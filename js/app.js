@@ -52,7 +52,7 @@ class App {
 
   async load() {
     if (this.forceDemo || !this.session()) { this.setState({ mode: 'demo', data: null, email: null }); return; }
-    this.setState({ mode: 'loading' });
+    this.setState({ mode: this.state.mode === 'live' ? 'refreshing' : 'loading' });
     try {
       const tk = await this.token();
       if (!tk) throw Object.assign(new Error('Sesión vencida'), { code: 401 });
@@ -74,12 +74,32 @@ class App {
       let notice = null;
       if (failed.length === jobs.length) throw new Error('ninguna vista respondió. ¿Ya corriste agrupay_analytics_v16.sql?');
       if (failed.length) notice = 'No se pudieron leer ' + failed.length + ' vistas: ' + failed.slice(0, 4).join(', ') + (failed.length > 4 ? '…' : '');
-      else if (empty) notice = 'Todas las vistas llegaron vacías. Si ya hay eventos, revisa que tu cuenta (' + (user.email || '¿?') + ') esté en analytics_admins.';
+      else if (empty) notice = await this.diagnose(tk, user);
       this.setState({ mode: 'live', data, email: user.email || 'sesión iniciada', notice, updatedAt: new Date() });
     } catch (e) {
       if (e.code === 401) localStorage.removeItem(LS_SESSION);
       this.setState({ mode: 'demo', data: null, email: null, notice: (e.code === 401 ? 'La sesión venció. Vuelve a entrar con Google.' : 'No se pudo leer Supabase: ' + e.message) + ' Mostrando datos de ejemplo.' });
     }
+  }
+
+  // Por qué llegaron vacías todas las vistas: ¿no es administrador, o sólo
+  // hay eventos del simulador (canal debug, que las vistas excluyen)?
+  async diagnose(tk, user) {
+    const h = { apikey: SB_KEY, Authorization: 'Bearer ' + tk };
+    const who = (user.email || 'tu cuenta') + (user.id ? ' (id ' + user.id + ')' : '');
+    try {
+      const adm = await fetch(SB_URL + '/rest/v1/rpc/analytics_is_admin', { method: 'POST', headers: { ...h, 'Content-Type': 'application/json' }, body: '{}' }).then((r) => (r.ok ? r.json() : null));
+      if (adm === false) return who + ' no está en analytics_admins, así que las vistas le devuelven cero filas. En el editor SQL de este proyecto corre: insert into public.analytics_admins (user_id) values (\'' + (user.id || '<id>') + '\'); y toca Actualizar.';
+      const inst = await fetchView('analytics_installs', 'select=channel', tk).catch(() => null);
+      if (inst && !inst.length) return 'Eres administrador, pero todavía no llegó ningún evento a este proyecto. Abre un build de la app que apunte a este proyecto y espera hasta 90 s a que mande el primer lote.';
+      if (inst) {
+        const ch = group(inst, (x) => x.channel || 'unknown', () => 1);
+        const list = [...ch.entries()].map(([k, v]) => k + ': ' + v).join(', ');
+        if (inst.every((x) => x.channel === 'debug')) return 'Hay ' + inst.length + ' instalaciones, todas del simulador (canal debug), y las vistas excluyen ese canal a propósito. Prueba desde un iPhone de verdad o desde TestFlight.';
+        return 'Las vistas llegaron vacías aunque hay instalaciones (' + list + '). Revisa que los eventos tengan fecha de los últimos 90 días.';
+      }
+    } catch (e) {}
+    return 'Todas las vistas llegaron vacías. Revisa que ' + who + ' esté en analytics_admins.';
   }
 
   login() {
@@ -129,8 +149,9 @@ class App {
   // ── Dibujo ─────────────────────────────────────────────────────────────
   render() {
     const S = this.state;
-    const live = S.mode === 'live';
-    const data = live && S.data ? S.data : this._demo || (this._demo = makeDemo());
+    const loading = S.mode === 'loading';
+    const live = S.mode === 'live' || S.mode === 'refreshing';
+    const data = live && S.data ? S.data : loading ? {} : this._demo || (this._demo = makeDemo());
     const today = limaToday();
     const range = S.range;
     const days = [];
@@ -138,10 +159,11 @@ class App {
     const ctx = { D: data, today, start: days[0], days, range, tip: null, wide: S.wide, setTip: () => {}, clearTip: null };
     const sec = SECTIONS.find((s) => s.id === S.section) || SECTIONS[0];
     let built;
-    try { built = build(sec.id, ctx); } catch (e) { console.error(e); built = { kpis: [], cards: [] }; }
+    let buildError = null;
+    try { built = build(sec.id, ctx); } catch (e) { console.error(e); buildError = e; built = { kpis: [], cards: [] }; }
     this.cards = new Map(built.cards.map((c) => [c.id, c]));
     const t = S.updatedAt ? S.updatedAt.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }) : '';
-    const status = S.mode === 'loading' ? { dot: 'var(--accent)', text: 'Cargando…' } : live ? { dot: 'var(--pos)', text: S.email + (t ? ' · ' + t : '') } : { dot: 'var(--warn)', text: 'Datos de ejemplo' };
+    const status = loading || S.mode === 'refreshing' ? { dot: 'var(--accent)', text: 'Cargando…' } : live ? { dot: 'var(--pos)', text: S.email + (t ? ' · ' + t : '') } : { dot: 'var(--warn)', text: 'Datos de ejemplo' };
     const footer = (live ? 'En vivo desde las vistas analytics_* de Supabase.' : 'Datos de ejemplo con la misma forma que las vistas analytics_*. Entra con una cuenta de analytics_admins para ver los reales.') + ' Hora de Lima; excluye el canal debug.';
     document.title = sec.label + ' · AgruPay Analítica';
 
@@ -174,8 +196,10 @@ class App {
             </div>
           </div>
           ${S.notice ? `<div class="notice">${esc(S.notice)}</div>` : ''}
+          ${buildError ? `<div class="notice">No se pudo armar esta sección: ${esc(buildError.message)}</div>` : ''}
+          ${loading ? `<div class="loading">Leyendo las vistas de Supabase…</div>` : `
           <div class="kpis">${built.kpis.map(renderKpi).join('')}</div>
-          <div class="cards">${built.cards.map(renderCard).join('')}</div>
+          <div class="cards">${built.cards.map(renderCard).join('')}</div>`}
           <div class="footer">${esc(footer)}</div>
         </div>
       </main>`;
