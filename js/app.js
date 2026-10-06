@@ -11,13 +11,13 @@ class App {
     try { ui = JSON.parse(localStorage.getItem(LS_UI) || '{}'); } catch (e) {}
     const q = new URLSearchParams(location.search);
     this.forceDemo = q.has('demo');
-    this.state = { section: ui.section || 'resumen', range: ui.range || 30, wide: window.innerWidth >= 900, mode: 'demo', data: null, email: null, notice: null, updatedAt: null };
+    this.captureHash();
+    this.state = { section: ui.section || 'resumen', range: ui.range || 30, wide: window.innerWidth >= 900, mode: !this.forceDemo && this.session() ? 'loading' : 'demo', data: null, email: null, notice: this.hashNotice || null, updatedAt: null };
     this.cards = new Map();
     window.addEventListener('resize', () => { const w = window.innerWidth >= 900; if (w !== this.state.wide) this.setState({ wide: w }); });
     root.addEventListener('click', (e) => this.onClick(e));
     root.addEventListener('mouseover', (e) => this.onHover(e));
     root.addEventListener('mouseout', (e) => this.onLeave(e));
-    this.captureHash();
     this.render();
     this.load();
   }
@@ -32,7 +32,7 @@ class App {
       try { localStorage.setItem(LS_SESSION, JSON.stringify(s)); } catch (e) {}
       history.replaceState(null, '', location.pathname + location.search);
     } else if (h.get('error_description')) {
-      this.state.notice = 'Google: ' + h.get('error_description');
+      this.hashNotice = 'Google: ' + h.get('error_description');
       history.replaceState(null, '', location.pathname + location.search);
     }
   }
@@ -52,7 +52,7 @@ class App {
 
   async load() {
     if (this.forceDemo || !this.session()) { this.setState({ mode: 'demo', data: null, email: null }); return; }
-    this.setState({ mode: this.state.mode === 'live' ? 'refreshing' : 'loading' });
+    this.setState({ mode: 'loading', notice: null });
     try {
       const tk = await this.token();
       if (!tk) throw Object.assign(new Error('Sesión vencida'), { code: 401 });
@@ -150,8 +150,10 @@ class App {
   render() {
     const S = this.state;
     const loading = S.mode === 'loading';
-    const live = S.mode === 'live' || S.mode === 'refreshing';
-    const data = live && S.data ? S.data : loading ? {} : this._demo || (this._demo = makeDemo());
+    const live = S.mode === 'live';
+    // Cargando: se arma la sección con los datos de ejemplo sólo para saber la
+    // forma de cada tarjeta (barras, ranking o tabla); ningún valor se muestra.
+    const data = live && S.data ? S.data : this._demo || (this._demo = makeDemo());
     const today = limaToday();
     const range = S.range;
     const days = [];
@@ -163,8 +165,8 @@ class App {
     try { built = build(sec.id, ctx); } catch (e) { console.error(e); buildError = e; built = { kpis: [], cards: [] }; }
     this.cards = new Map(built.cards.map((c) => [c.id, c]));
     const t = S.updatedAt ? S.updatedAt.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }) : '';
-    const status = loading || S.mode === 'refreshing' ? { dot: 'var(--accent)', text: 'Cargando…' } : live ? { dot: 'var(--pos)', text: S.email + (t ? ' · ' + t : '') } : { dot: 'var(--warn)', text: 'Datos de ejemplo' };
-    const footer = (live ? 'En vivo desde las vistas analytics_* de Supabase.' : 'Datos de ejemplo con la misma forma que las vistas analytics_*. Entra con una cuenta de analytics_admins para ver los reales.') + ' Hora de Lima; excluye el canal debug.';
+    const status = loading ? { dot: 'var(--accent)', text: 'Cargando…' } : live ? { dot: 'var(--pos)', text: S.email + (t ? ' · ' + t : '') } : { dot: 'var(--warn)', text: 'Datos de ejemplo' };
+    const footer = (live || loading ? 'En vivo desde las vistas analytics_* de Supabase.' : 'Datos de ejemplo con la misma forma que las vistas analytics_*. Entra con una cuenta de analytics_admins para ver los reales.') + ' Hora de Lima; excluye el canal debug.';
     document.title = sec.label + ' · AgruPay Analítica';
 
     const navBtn = (s, cls) => `<button class="${cls}${s.id === sec.id ? ' on' : ''}" data-act="go" data-id="${esc(s.id)}">${esc(s.label)}</button>`;
@@ -192,14 +194,13 @@ class App {
               ${!sec.fixed ? `<div class="seg">${[7, 30, 90].map((n) => `<button class="${n === range ? 'on' : ''}" data-act="range" data-n="${n}">${n} días</button>`).join('')}</div>` : ''}
               <div class="status"><span class="dot" style="background:${status.dot}"></span><span class="status-text">${esc(status.text)}</span></div>
               ${S.mode === 'demo' && !this.forceDemo ? `<button class="btn primary" data-act="login">Entrar con Google</button>` : ''}
-              ${live ? `<button class="btn" data-act="reload">Actualizar</button><button class="btn muted" data-act="logout">Salir</button>` : ''}
+              ${live || loading ? `<button class="btn" data-act="reload"${loading ? ' disabled' : ''}>Actualizar</button><button class="btn muted" data-act="logout">Salir</button>` : ''}
             </div>
           </div>
           ${S.notice ? `<div class="notice">${esc(S.notice)}</div>` : ''}
           ${buildError ? `<div class="notice">No se pudo armar esta sección: ${esc(buildError.message)}</div>` : ''}
-          ${loading ? `<div class="loading">Leyendo las vistas de Supabase…</div>` : `
-          <div class="kpis">${built.kpis.map(renderKpi).join('')}</div>
-          <div class="cards">${built.cards.map(renderCard).join('')}</div>`}
+          <div class="kpis"${loading ? ' aria-busy="true"' : ''}>${built.kpis.map(loading ? renderKpiSkeleton : renderKpi).join('')}</div>
+          <div class="cards"${loading ? ' aria-busy="true"' : ''}>${built.cards.map(loading ? renderCardSkeleton : renderCard).join('')}</div>
           <div class="footer">${esc(footer)}</div>
         </div>
       </main>`;
@@ -215,6 +216,28 @@ class App {
 
 function renderKpi(k) {
   return `<div class="kpi"><div class="kpi-label">${esc(k.label)}</div><div class="kpi-value" style="color:${esc(k.color)}">${esc(k.value)}</div><div class="kpi-sub">${esc(k.sub)}</div></div>`;
+}
+
+// Esqueletos: el título y la descripción son fijos de la sección; los valores
+// se reemplazan por bloques con brillo.
+function renderKpiSkeleton(k) {
+  return `<div class="kpi"><div class="kpi-label">${esc(k.label)}</div><div class="sk sk-value"></div><div class="sk sk-line" style="width:60%"></div></div>`;
+}
+
+function renderCardSkeleton(c) {
+  let body;
+  if (c.isBars) {
+    const n = Math.min(c.bars.length, 30);
+    body = `<div class="chart"><div class="sk sk-line" style="width:45%"></div><div class="plot sk-plot">${Array.from({ length: n }, (_, i) => `<div class="sk sk-bar" style="height:${35 + 45 * Math.abs(Math.sin(i * 0.7))}%"></div>`).join('')}</div></div>`;
+  } else if (c.isTable) {
+    body = `<div class="sk-rows">${Array.from({ length: Math.min(Math.max(c.trs.length, 3), 6) }, () => `<div class="sk sk-line"></div>`).join('')}</div>`;
+  } else {
+    body = `<div class="rank">${Array.from({ length: Math.min(Math.max(c.rows.length, 3), 6) }, (_, i) => `<div class="rrow"><div class="sk sk-line" style="width:${70 - i * 7}%"></div><div class="sk sk-track"></div></div>`).join('')}</div>`;
+  }
+  return `<section class="card" style="grid-column:${esc(c.span)}">
+    <div class="card-head"><div class="card-titles"><div class="card-title">${esc(c.title)}</div><div class="card-sub">${esc(c.sub)}</div></div></div>
+    ${body}
+  </section>`;
 }
 
 function renderCard(c) {
