@@ -1,8 +1,8 @@
 // Lógica del panel: datos de ejemplo, lectura de Supabase y armado de cada sección.
 // Sale del diseño «Panel de Analítica»; la vista está en app.js.
 
-const SB_URL = 'https://zjzzqaeusmxmtszgdncl.supabase.co';
-const SB_KEY = 'sb_publishable_NVM2GcvxZFmf0VLNbaBr7A_y_8EMS97';
+const SB_URL = 'https://zxfeixwrruclypwjuhnl.supabase.co';
+const SB_KEY = 'sb_publishable_wJE6quWd2Lu_4rgYvF39CA_iur9-VeT';
 const LS_SESSION = 'agrupay-panel-session';
 const LS_UI = 'agrupay-panel-ui';
 const COL = { a: 'var(--accent)', gold: 'var(--gold)', pur: 'var(--purple)', cyan: 'var(--cyan)', pos: 'var(--pos)', org: 'var(--orange)', neg: 'var(--neg)', warn: 'var(--warn)', mute: 'var(--sep2)' };

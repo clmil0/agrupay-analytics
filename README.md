@@ -18,7 +18,10 @@ Sin dependencias ni compilación: GitHub Pages sirve la rama `main` tal cual.
 
 ## Conexión con Supabase
 
-1. **Authentication › URL Configuration › Redirect URLs**: agrega
+Proyecto propio de analítica: `Agrupay_Analytics` (`https://zxfeixwrruclypwjuhnl.supabase.co`),
+separado de la base de la app.
+
+1. **Authentication › URL Configuration › Redirect URLs** (o `scripts/supabase-redirect.sh`): agrega
    `https://clmil0.github.io/agrupay-analytics/` (y `http://localhost:8765/` para probar en local).
    Si falta, Google vuelve al *Site URL* del proyecto en lugar del panel.
 2. Hazte administrador (editor SQL):
@@ -26,7 +29,7 @@ Sin dependencias ni compilación: GitHub Pages sirve la rama `main` tal cual.
    insert into public.analytics_admins (user_id)
    select id from auth.users where email = 'tu-correo@gmail.com';
    ```
-   La cuenta tiene que haber entrado al menos una vez (al panel o a la app) para existir en `auth.users`.
+   La cuenta tiene que haber entrado al panel al menos una vez para existir en `auth.users`.
 
 La llave del panel es la **publicable**: sólo puede llamar `ingest_analytics`; leer exige una sesión
 que esté en `analytics_admins`. Nunca pongas aquí la `service_role`.

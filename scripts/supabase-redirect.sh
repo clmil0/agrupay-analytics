@@ -4,7 +4,7 @@
 # https://supabase.com/dashboard/account/tokens
 #   SUPABASE_ACCESS_TOKEN=sbp_... ./scripts/supabase-redirect.sh
 set -euo pipefail
-REF=zjzzqaeusmxmtszgdncl
+REF=zxfeixwrruclypwjuhnl
 API=https://api.supabase.com/v1/projects/$REF/config/auth
 : "${SUPABASE_ACCESS_TOKEN:?Falta SUPABASE_ACCESS_TOKEN}"
 H=(-H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" -H "Content-Type: application/json")
