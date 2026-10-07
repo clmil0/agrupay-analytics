@@ -12,7 +12,8 @@ de un administrador. Sin sesión muestra datos de ejemplo con la misma forma.
 |---|---|
 | `index.html`, `styles.css` | Página y estilos (claro/oscuro, responsive). |
 | `js/panel.js` | Datos de ejemplo, lectura de Supabase y armado de cada sección. |
-| `js/app.js` | Estado, sesión de Google y dibujo en el DOM. |
+| `js/app.js` | Estado, sesión de Google y dibujo en el DOM (escritorio ≥ 900 px; debajo, app de iPhone con pestañas). |
+| `manifest.webmanifest`, `icons/` | «Añadir a inicio»: ícono y modo pantalla completa. `scripts/icons.py` regenera los PNG. |
 
 Sin dependencias ni compilación: GitHub Pages sirve la rama `main` tal cual.
 

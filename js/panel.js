@@ -188,7 +188,7 @@ function bars(ctx, o) {
   const n = o.keys.length;
   const list = o.keys.map((k, i) => ({ h: tots[i] > 0 ? Math.max(2, (tots[i] / max) * 100) + '%' : '0%', op: sel == null || sel === i ? 1 : 0.4, on: () => ctx.setTip(o.id, i), segs: o.series.map((s, j) => ({ f: vals[i][j], c: s.c })).filter((x) => x.f > 0) }));
   const tipAt = (i) => { const k = o.keys[i]; return o.tipFn ? o.tipFn(k, vals[i]) : xl(k) + ' · ' + o.series.map((s, j) => (o.series.length > 1 ? s.label + ' ' : '') + fmt(vals[i][j])).join(' · '); };
-  const hint = ctx.wide ? 'Pasa el cursor por una barra para ver el detalle' : 'Toca una barra para ver el detalle';
+  const hint = ctx.wide ? 'Pasa el cursor por una barra para ver el detalle' : 'Toca o desliza sobre las barras';
   list.forEach((b, i) => { b.tip = tipAt(i); });
   const tip = sel != null && sel < n ? list[sel].tip : hint;
   return Object.assign(base(o), { isBars: !empty, empty, bars: list, tip, hint, clear: ctx.clearTip, axis: n ? [xl(o.keys[0]), xl(o.keys[Math.floor((n - 1) / 2)]), xl(o.keys[n - 1])] : [], gap: n > 45 ? '1px' : n > 20 ? '2px' : '4px', legend: o.series.length > 1 ? o.series.map((s) => ({ label: s.label, c: s.c })) : [] });
