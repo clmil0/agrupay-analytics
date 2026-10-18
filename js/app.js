@@ -79,7 +79,8 @@ class App {
       const empty = Object.values(data).every((r) => !r.length);
       let notice = null;
       if (failed.length === jobs.length) throw new Error('ninguna vista respondió. ¿Ya corriste agrupay_analytics_v16.sql?');
-      if (failed.length) notice = 'No se pudieron leer ' + failed.length + ' vistas: ' + failed.slice(0, 4).join(', ') + (failed.length > 4 ? '…' : '');
+      if (failed.length && failed.every((v) => V21.includes(v))) notice = 'Faltan las vistas de comercios, hoja de clasificar y suscripciones (' + failed.length + '). Corre agrupay_analytics_v21_merchants.sql en este proyecto y toca Actualizar.';
+      else if (failed.length) notice = 'No se pudieron leer ' + failed.length + ' vistas: ' + failed.slice(0, 4).join(', ') + (failed.length > 4 ? '…' : '');
       else if (empty) notice = await this.diagnose(tk, user);
       this.setState({ mode: 'live', data, email: user.email || 'sesión iniciada', notice, updatedAt: new Date() });
     } catch (e) {

@@ -13,6 +13,8 @@ const SECTIONS = [
   { id: 'uso', label: 'Uso', desc: 'Pantallas, toques, navegación y funciones.' },
   { id: 'correo', label: 'Motor de correo', desc: 'Lectores por banco, lecturas, latencia y cuentas conectadas.' },
   { id: 'clasificacion', label: 'Clasificación', desc: 'Automático contra manual, precisión de cada motor, sugerencias y Pendientes.' },
+  { id: 'comercios', label: 'Comercios', desc: 'Qué comercios se clasifican solos, cuáles se corrigen y cuáles llegan sin categoría.' },
+  { id: 'suscripciones', label: 'Suscripciones', desc: 'Cuánto acierta el detector de suscripciones en los últimos 30 días.', fixed: true },
   { id: 'pro', label: 'Pro y paywall', desc: 'Qué función vende y cuánto se usa lo Pro.' },
   { id: 'calidad', label: 'Calidad', desc: 'Arranque, crashes, cuelgues, errores y Face ID.' },
   { id: 'adopcion', label: 'Adopción de ajustes', desc: 'Última foto diaria de cada instalación en los últimos 14 días.', fixed: true },
@@ -23,14 +25,19 @@ const LBL = {
   src: { icon: 'Ícono', notification: 'Notificación', link: 'Widget / Atajos', invite: 'Invitación' },
   step: { slide_1: 'Pantalla 1', slide_2: 'Pantalla 2', slide_3: 'Pantalla 3', login: 'Inicio de sesión', connect_tapped: 'Tocó conectar', connected: 'Conectó el correo', restore_offered: 'Se ofreció restaurar', history: 'Historial', reading: 'Leyendo', no_account: 'Sin cuenta', finished: 'Terminó' },
   ms: { first_movement: 'Primer movimiento', first_email_movement: 'Primer movimiento del correo', first_classification: 'Primera clasificación', first_rule: 'Primera regla', first_friend: 'Primer amigo' },
-  engine: { rule: 'Regla de comercio', keyword: 'Palabra clave', voice: 'Voz', recurring: 'Recurrente' },
+  engine: { rule: 'Regla de comercio', keyword: 'Palabra clave', voice: 'Voz', recurring: 'Recurrente', usuario: 'Usuario' },
   sugg: { rule: 'Regla', root: 'Raíz', catalog: 'Catálogo' },
   pro: { history: 'Historial', ai: 'Asistente IA', alerts: 'Alertas', cloud: 'Nube', sync: 'Sincronización', themes: 'Temas', profile: 'Perfil', general: 'General' },
   acct: { account_connect_started: 'Abrió la ventana', account_connected: 'Conectó', account_connect_failed: 'Falló', account_disconnected: 'Desconectó' },
   prov: { google: 'Google', microsoft: 'Microsoft', gmail: 'Gmail', outlook: 'Outlook' },
   msrc: { form: 'Formulario', form_locked: 'Formulario (bloqueado)', quick: 'Rápido', voice: 'Voz', siri: 'Siri', recurring: 'Recurrente' },
-  via: { detail: 'Detalle', pending_suggestion: 'Sugerencia en Pendientes', pending_sheet: 'Hoja en Pendientes', bulk: 'En bloque', bulk_suggestions: 'Sugerencias en bloque', selection: 'Selección' },
-  origin: { pending: 'Pendientes', bulk: 'En bloque', detail: 'Detalle', add_form: 'Formulario' },
+  via: { detail: 'Detalle', pending_suggestion: 'Sugerencia en Pendientes', pending_sheet: 'Hoja en Pendientes', bulk: 'En bloque', bulk_suggestions: 'Sugerencias en bloque', selection: 'Selección', assistant: 'Asistente', quick_sheet: 'Hoja de clasificar', burst: 'Ráfaga' },
+  origin: { pending: 'Pendientes', bulk: 'En bloque', detail: 'Detalle', add_form: 'Formulario', quick_sheet: 'Hoja de clasificar', burst: 'Ráfaga', selection: 'Selección' },
+  msrcs: { auto: 'Solo (motor)', arrived: 'Llegó sin categoría', manual: 'A mano', reclassified: 'Reclasificado' },
+  mode: { single: 'Hoja suelta', burst: 'Ráfaga', bulk: 'En bloque' },
+  level: { detected: 'Detectada', suggested: 'Sugerida' },
+  cadence: { weekly: 'Semanal', monthly: 'Mensual', yearly: 'Anual' },
+  ctrl: { 'movements.month': 'Mes', 'movements.accounts': 'Tus cuentas', 'movements.earlier': 'Meses anteriores', 'movements.penguin': 'Pingüino', 'movements.classify': 'Clasificar ›' },
   notif: { imported: 'Importados', payment_reminder: 'Recordatorio de pago', debt_reminder: 'Recordatorio de deuda', recurring: 'Recurrente', budget: 'Presupuesto', category_limit: 'Límite de categoría', other: 'Otro' },
   unlock: { ok: 'Correcto', cancelled: 'Cancelado', not_recognized: 'No reconocido', lockout: 'Bloqueado' },
   channel: { testflight: 'TestFlight', appstore: 'App Store' },
@@ -59,6 +66,14 @@ const byDay = (rows) => { const m = new Map(); (rows || []).forEach((x) => m.set
 const latest = (rows, key) => (rows || []).slice().sort((a, b) => (a[key] < b[key] ? 1 : -1))[0];
 const wavg = (rows, k, w) => { const xs = (rows || []).filter((x) => ok(x[k])); const n = sum(xs, w); return n ? xs.reduce((a, x) => a + num(x[k]) * num(x[w]), 0) / n : null; };
 const items = (m, d, extra) => [...m.entries()].map(([k, v]) => Object.assign({ label: d ? lab(d, k) : (k == null ? '—' : String(k)), value: v, key: k }, extra ? extra(k, v) : {}));
+// Suma las columnas `keys` de la fila `x` en el acumulado de la clave `k`.
+const tally = (m, k, keys, x) => { const o = m.get(k) || m.set(k, Object.fromEntries(keys.map((c) => [c, 0]))).get(k); keys.forEach((c) => { o[c] += num(x[c]); }); return o; };
+const pct = (a, b) => (num(b) ? Math.round((num(a) / num(b)) * 1000) / 10 : null);
+// Comercios: lo que va a una persona llega como `yape_persona`, `plin_persona`… o `persona`.
+const mlab = (k) => { if (k == null) return '—'; const m = /^(?:(.+)_)?persona$/.exec(k); if (!m) return String(k); return m[1] ? ({ yape: 'Yape', plin: 'Plin' }[m[1]] || m[1].toUpperCase()) + ' · a persona' : 'A una persona'; };
+const clab = (k) => { if (k == null || k === '') return '—'; if (k === 'sin_clasificar') return 'Sin clasificar'; const s = String(k).replace(/_/g, ' '); return s[0].toUpperCase() + s.slice(1); };
+// Para porcentajes donde lo bajo es lo malo (precisión, acierto).
+const pctLow = (v, bad) => (!ok(v) ? { v: '—', color: 'var(--text3)' } : { v: P(v), color: v < bad ? 'var(--neg)' : 'var(--text)', fw: v < bad ? 600 : 400 });
 const pctCell = (v, bad) => (!ok(v) ? { v: '—', color: 'var(--text3)' } : { v: P(Math.round(v * 10) / 10), color: bad != null && v >= bad ? 'var(--neg)' : 'var(--text)', fw: bad != null && v >= bad ? 600 : 400 });
 
 function makeDemo() {
@@ -121,6 +136,25 @@ function makeDemo() {
     push('analytics_metrickit_daily', { day, app_version: v, reports: Math.round(dau * 0.5), avg_launch_ms: jit(v === '1.5.0' ? 480 : 560, 0.05), avg_resume_ms: jit(120, 0.1), avg_hang_ms: jit(300, 0.2), avg_peak_memory_mb: jit(185, 0.05), fg_abnormal_exits: ri(0, 2) });
     [['sync_list', 'transient', 0.05], ['sync_list', 'failed', 0.015], ['sync_fetch', 'message_download', 0.03], ['payment_reminder', 'send_failed', 0.008]].forEach(([domain, code, w]) => { const e = jit(dau * w, 0.5); if (e) push('analytics_errors_daily', { day, domain, code, errors: e, installs: Math.max(1, Math.round(e * 0.7)) }); });
     [['ok', 0.3], ['cancelled', 0.025], ['not_recognized', 0.02], ['lockout', 0.002]].forEach(([result, w]) => { const a = jit(dau * w, 0.3); if (a) push('analytics_unlock_daily', { day, result, attempts: a, installs: Math.max(1, Math.round(a * 0.6)) }); });
+    // v21: comercio, categoría, motor, parte automática, parte corregida, peso.
+    [['RAPPI', 'delivery', 'rule', 0.92, 0.03, 3], ['WONG', 'supermercado', 'rule', 0.85, 0.02, 2.5], ['PLAZA VEA', 'supermercado', 'keyword', 0.7, 0.06, 2.2], ['TAMBO', 'comida', 'keyword', 0.6, 0.12, 2.4], ['UBER', 'transporte', 'rule', 0.9, 0.03, 2], ['NETFLIX', 'suscripciones', 'keyword', 0.96, 0.01, 0.5], ['SPOTIFY', 'suscripciones', 'keyword', 0.95, 0.01, 0.5], ['yape_persona', 'transferencias', null, 0, 0, 3.5], ['plin_persona', 'transferencias', null, 0, 0, 1.2], ['STARBUCKS', 'cafe', 'keyword', 0.5, 0.18, 1.1], ['INKAFARMA', 'salud', null, 0.15, 0.05, 0.9], ['PRIMAX', 'transporte', 'keyword', 0.55, 0.22, 1.3], ['MASS', 'supermercado', null, 0.1, 0.05, 1.4], ['CINEPLANET', 'ocio', 'keyword', 0.4, 0.1, 0.6]].forEach(([merchant, cat, engine, pa, pc, w]) => {
+      const n = jit(dau * 0.025 * w, 0.4);
+      const au = engine ? Math.round(n * pa) : 0, ar = n - au;
+      const row = (source, eng, from, to, m) => { if (m > 0) push('analytics_merchant_daily', { day, merchant, source, engine: eng, from_category: from, to_category: to, movements: m, installs: Math.max(1, Math.round(m * 0.7)) }); };
+      row('auto', engine, 'sin_clasificar', cat, au);
+      row('arrived', null, 'sin_clasificar', null, ar);
+      row('manual', null, 'sin_clasificar', merchant.endsWith('persona') ? (r() < 0.6 ? 'familia' : 'varios') : cat, Math.round(ar * 0.6));
+      row('reclassified', engine, cat, cat === 'comida' ? 'cafe' : cat === 'transporte' ? 'auto' : 'varios', Math.round(au * pc + (engine && r() < 0.08 ? 1 : 0)));
+      row('reclassified', null, cat, 'varios', r() < 0.03 ? 1 : 0);
+    });
+    [['single', 0.25, 1], ['burst', 0.08, 7], ['bulk', 0.04, 10]].forEach(([mode, w, per]) => {
+      const s = jit(dau * w, 0.3); if (!s) return;
+      const it = s * per, cl = Math.round(it * (mode === 'burst' ? 0.72 : 0.92));
+      push('analytics_classify_sheet_daily', { day, mode, sheets: s, installs: Math.max(1, Math.round(s * 0.7)), items: it, classified: cl, tagged: Math.round(it * 0.07), skipped: mode === 'burst' ? it - cl : null, completed: Math.round(s * (mode === 'burst' ? 0.55 : 0.9)), bulk_with_earlier: mode === 'bulk' ? Math.round(s * 0.4) : 0, bulk_with_rule: mode === 'bulk' ? Math.round(s * 0.6) : 0 });
+    });
+    const qc = jit(dau * 0.9, 0.2), qu = jit(qc * 0.04, 0.6);
+    push('analytics_classification_undo_daily', { day, undos: Math.round(qu * 0.7), movements_undone: qu, movements_classified: qc, pct_undone: pct(qu, qc) });
+    if (r() < 0.2) push('analytics_rules_backfill_daily', { day, runs: ri(1, 3), movements: ri(5, 60) });
   }
   const da = D.analytics_daily_active;
   for (let w = 12; w >= 0; w--) {
@@ -156,11 +190,47 @@ function makeDemo() {
   [['lavender', 22, 14], ['mint', 17, 11], ['sky', 13, 9], ['peach', 9, 6], ['rose', 8, 6], ['charcoal', 6, 5]].forEach(([theme, c, i]) => push('analytics_themes_30d', { theme, changes: c, installs: i }));
   push('analytics_adoption_latest', { installs: 412, pct_gmail: 81.3, pct_outlook: 7.8, pct_pro: 10.2, pct_app_lock: 24.5, pct_notifications: 68.9, pct_widgets: 19.4, pct_budget: 27.2, pct_with_friends: 22.1, pct_with_rules: 58.6, avg_rules: 6.4 });
   [['1.5.0', 'appstore', 238], ['1.5.0', 'testflight', 14], ['1.4.1', 'appstore', 96], ['1.4.0', 'appstore', 21], ['1.5.1', 'testflight', 6]].forEach(([app_version, channel, installs]) => push('analytics_versions_7d', { app_version, channel, installs }));
+  Object.assign(D, merchant30(D.analytics_merchant_daily, addD(today, -29)));
+  [['movements.month', 420, 160, 1.8, 35, 0, null], ['movements.classify', 380, 150, null, 0, 120, null], ['movements.penguin', 140, 80, null, 0, 0, 62.5], ['movements.accounts', 110, 70, null, 0, 0, null], ['movements.earlier', 90, 50, null, 0, 0, null]].forEach(([control, taps, installs, avg_months_back, all_months, bursts, avg_pct_classified]) => push('analytics_movements_controls_30d', { control, taps, installs, avg_months_back, all_months, bursts, avg_pct_classified }));
+  [['detected', 'monthly', 140, 22, 84, 9], ['detected', 'yearly', 18, 4, 79, 0], ['detected', 'weekly', 6, 5, 71, 0], ['suggested', 'monthly', 40, 38, 58, 6], ['suggested', 'weekly', 5, 9, 52, 0]].forEach(([level, cadence, confirmed, rejected, avg_score, as_installments]) => push('analytics_subscription_detection_30d', { level, cadence, confirmed, rejected, pct_confirmed: pct(confirmed, confirmed + rejected), avg_score, as_installments }));
+  [['NETFLIX', 'suscripciones', 48, 2, 93], ['SPOTIFY', 'suscripciones', 41, 3, 91], ['SMART FIT', 'deporte', 22, 4, 82], ['MOVISTAR', 'servicios', 19, 6, 77], ['CLARO', 'servicios', 12, 5, 74], ['RAPPI', 'delivery', 3, 21, 48], ['UBER', 'transporte', 1, 14, 44], ['APPLE.COM/BILL', 'suscripciones', 27, 1, 88]].forEach(([merchant, category, confirmed, rejected, avg_score]) => push('analytics_subscription_merchants_30d', { merchant, category, confirmed, rejected, avg_score }));
   return D;
 }
 
-const DAILY = ['analytics_daily_active', 'analytics_new_installs_daily', 'analytics_open_sources_daily', 'analytics_notifications_daily', 'analytics_screens_daily', 'analytics_taps_daily', 'analytics_navigation_daily', 'analytics_feature_usage_daily', 'analytics_parser_health_daily', 'analytics_sync_runs_daily', 'analytics_email_latency_daily', 'analytics_accounts_daily', 'analytics_classification_daily', 'analytics_auto_vs_manual_daily', 'analytics_pending_backlog_daily', 'analytics_movements_created_daily', 'analytics_rules_daily', 'analytics_paywall_daily', 'analytics_pro_feature_usage_daily', 'analytics_launch_perf_daily', 'analytics_screen_perf_daily', 'analytics_stability_daily', 'analytics_metrickit_daily', 'analytics_errors_daily', 'analytics_unlock_daily'];
-const FLAT = ['analytics_open_hours_30d', 'analytics_max_months_back_30d', 'analytics_chart_modes_30d', 'analytics_feature_discovery', 'analytics_activation_milestones', 'analytics_auto_accuracy_30d', 'analytics_suggestions_30d', 'analytics_paywall_30d', 'analytics_pro_engagement_30d', 'analytics_themes_30d', 'analytics_adoption_latest', 'analytics_versions_7d'];
+// Sólo para el ejemplo: arma las vistas de 30 días de comercios desde la diaria,
+// con las mismas cuentas que hace v21 en SQL.
+function merchant30(daily, start) {
+  const md = inR(daily, start);
+  const rk = new Map(), rc = new Map(), au = new Map(), ar = new Map(), ch = new Map();
+  const add = (m, k, o, f) => { const x = m.get(k) || m.set(k, o).get(k); f(x); };
+  md.forEach((x) => {
+    const v = num(x.movements);
+    add(rk, x.merchant, { merchant: x.merchant, arrived: 0, auto: 0, arrived_unclassified: 0, manual_from_pending: 0, reclassified: 0, corrected_auto: 0 }, (m) => {
+      if (x.source === 'auto') { m.auto += v; m.arrived += v; }
+      if (x.source === 'arrived') { m.arrived_unclassified += v; m.arrived += v; }
+      if (x.source === 'manual') m.manual_from_pending += v;
+      if (x.source === 'reclassified') { m.reclassified += v; if (x.engine) m.corrected_auto += v; }
+    });
+    if (x.source === 'reclassified') add(rc, [x.merchant, x.from_category, x.to_category, x.engine || 'usuario'].join('|'), { merchant: x.merchant, from_category: x.from_category, to_category: x.to_category, replaced: x.engine || 'usuario', movements: 0, days: new Set() }, (m) => { m.movements += v; m.days.add(x.day); });
+    if (x.source === 'auto') add(au, [x.merchant, x.engine, x.to_category].join('|'), { merchant: x.merchant, engine: x.engine, category: x.to_category, movements: 0 }, (m) => { m.movements += v; });
+    if (x.source === 'arrived') ar.set(x.merchant, (ar.get(x.merchant) || 0) + v);
+    if (x.source === 'manual') add(ch, x.merchant, new Map(), (m) => m.set(x.to_category, (m.get(x.to_category) || 0) + v));
+  });
+  return {
+    analytics_merchant_ranking_30d: [...rk.values()].map((m) => Object.assign(m, { pct_auto: pct(m.auto, m.arrived), pct_auto_kept: m.auto ? Math.round(1000 * (1 - m.corrected_auto / m.auto)) / 10 : null })),
+    analytics_merchant_reclassified_30d: [...rc.values()].map((m) => Object.assign(m, { days: m.days.size })),
+    analytics_merchant_auto_30d: [...au.values()],
+    analytics_merchant_unclassified_30d: [...ar.entries()].map(([merchant, arrived]) => {
+      const top = [...(ch.get(merchant) || new Map()).entries()].sort((a, b) => b[1] - a[1]);
+      return { merchant, arrived, classified_by_hand: top.reduce((a, x) => a + x[1], 0), top_category: top[0] ? top[0][0] : null, top_category_movements: top[0] ? top[0][1] : null };
+    }),
+  };
+}
+
+const DAILY = ['analytics_daily_active', 'analytics_new_installs_daily', 'analytics_open_sources_daily', 'analytics_notifications_daily', 'analytics_screens_daily', 'analytics_taps_daily', 'analytics_navigation_daily', 'analytics_feature_usage_daily', 'analytics_parser_health_daily', 'analytics_sync_runs_daily', 'analytics_email_latency_daily', 'analytics_accounts_daily', 'analytics_classification_daily', 'analytics_auto_vs_manual_daily', 'analytics_pending_backlog_daily', 'analytics_movements_created_daily', 'analytics_rules_daily', 'analytics_paywall_daily', 'analytics_pro_feature_usage_daily', 'analytics_launch_perf_daily', 'analytics_screen_perf_daily', 'analytics_stability_daily', 'analytics_metrickit_daily', 'analytics_errors_daily', 'analytics_unlock_daily', 'analytics_merchant_daily', 'analytics_classify_sheet_daily', 'analytics_classification_undo_daily', 'analytics_rules_backfill_daily'];
+const FLAT = ['analytics_open_hours_30d', 'analytics_max_months_back_30d', 'analytics_chart_modes_30d', 'analytics_feature_discovery', 'analytics_activation_milestones', 'analytics_auto_accuracy_30d', 'analytics_suggestions_30d', 'analytics_paywall_30d', 'analytics_pro_engagement_30d', 'analytics_themes_30d', 'analytics_adoption_latest', 'analytics_versions_7d', 'analytics_merchant_ranking_30d', 'analytics_merchant_reclassified_30d', 'analytics_merchant_auto_30d', 'analytics_merchant_unclassified_30d', 'analytics_movements_controls_30d', 'analytics_subscription_detection_30d', 'analytics_subscription_merchants_30d'];
+// Las que agrega agrupay_analytics_v21_merchants.sql, para avisar si falta correrlo.
+const V21 = ['analytics_merchant_daily', 'analytics_classify_sheet_daily', 'analytics_classification_undo_daily', 'analytics_rules_backfill_daily', 'analytics_merchant_ranking_30d', 'analytics_merchant_reclassified_30d', 'analytics_merchant_auto_30d', 'analytics_merchant_unclassified_30d', 'analytics_movements_controls_30d', 'analytics_subscription_detection_30d', 'analytics_subscription_merchants_30d'];
 
 async function fetchView(view, filter, token) {
   let out = [];
@@ -303,6 +373,7 @@ function build(id, ctx) {
         rank({ id: 'features', title: 'Uso de funciones', sub: 'Cada uso cuenta.', limit: 16, items: items(group(fu, (x) => x.feature, (x) => x.uses)) }),
         bars(ctx, { id: 'monthsback', title: 'Cuántos meses atrás se mira', sub: 'Lo más lejos que llegó cada persona.', meta: '30 días', keys: mbKeys, xlab: (m) => (m === 0 ? 'este mes' : m + ' m'), tipFn: (m, v) => (m === 0 ? 'Sólo este mes' : m + (m === 1 ? ' mes' : ' meses') + ' atrás') + ' · ' + N(v[0]) + ' personas', series: [{ label: 'Personas', c: COL.a, get: (m) => mbm.get(m) || 0 }] }),
         rank({ id: 'chartmode', title: 'Modo del gráfico del Resumen', sub: 'Días, Semanas o Meses.', meta: '30 días', items: (D.analytics_chart_modes_30d || []).map((x) => ({ label: x.mode, value: num(x.choices), note: N(x.installs) + ' personas' })) }),
+        table({ id: 'mvcontrols', wide: true, title: 'Controles de Movimientos', sub: 'Mes, Tus cuentas, meses anteriores, pingüino y «Clasificar ›». «Todos» es elegir todos los meses; el % es lo clasificado del mes al tocar el pingüino.', meta: '30 días', cols: [{ label: 'Control', align: 'left', w: 'minmax(110px,1.4fr)' }, { label: 'Toques' }, { label: 'Personas' }, { label: 'Meses atrás' }, { label: 'Todos' }, { label: 'Ráfagas' }, { label: '% clasificado' }], minW: '600px', rows: (D.analytics_movements_controls_30d || []).slice().sort((a, b) => num(b.taps) - num(a.taps)).map((x) => [{ v: lab('ctrl', x.control), fw: 500 }, N(x.taps), N(x.installs), N(x.avg_months_back), num(x.all_months) ? N(x.all_months) : '—', num(x.bursts) ? N(x.bursts) : '—', P(x.avg_pct_classified)]) }),
       ],
     };
   }
@@ -353,6 +424,12 @@ function build(id, ctx) {
     const sgA = sum(sg, 'accepted'), sgD = sum(sg, 'dismissed');
     const g = (k) => (d) => num(avm.get(d) && avm.get(d)[k]);
     const mc = inR(D.analytics_movements_created_daily, st);
+    const cs = inR(D.analytics_classify_sheet_daily, st);
+    const modes = new Map();
+    cs.forEach((x) => tally(modes, x.mode, ['sheets', 'installs', 'items', 'classified', 'tagged', 'skipped', 'completed', 'bulk_with_earlier', 'bulk_with_rule'], x));
+    const ud = inR(D.analytics_classification_undo_daily, st); const udm = byDay(ud);
+    const undone = sum(ud, 'movements_undone'), quick = sum(ud, 'movements_classified');
+    const bf = inR(D.analytics_rules_backfill_daily, st); const bfm = byDay(bf);
     return {
       kpis: [
         kpi('Clasificado automático', autoT + man ? P(Math.round((autoT / (autoT + man)) * 1000) / 10) : '—', 'contra lo sacado a mano de Pendientes'),
@@ -360,6 +437,7 @@ function build(id, ctx) {
         kpi('Reglas creadas', N(sum(rules, 'rules')), 'en ' + R + ' días'),
         kpi('Pendientes del mes', N(pbLast && pbLast.p50_pending_month), pbLast ? 'mediana · ' + fd(pbLast.day) : '—'),
         kpi('Sugerencias aceptadas', sgA + sgD ? P(Math.round((sgA / (sgA + sgD)) * 1000) / 10) : '—', '30 días'),
+        kpi('Deshecho tras clasificar', P(pct(undone, quick)), N(sum(ud, 'undos')) + ' veces «Deshacer»', pct(undone, quick) >= 10 ? 'var(--warn)' : null),
       ],
       cards: [
         bars(ctx, { id: 'automan', wide: true, title: 'Automático contra manual', sub: 'Movimientos que llegaron ya clasificados y los que el usuario sacó de Pendientes.', keys: days, series: [{ label: 'Regla de comercio', c: COL.a, get: g('auto_rule') }, { label: 'Palabra clave', c: COL.cyan, get: g('auto_keyword') }, { label: 'Voz y recurrentes', c: COL.pur, get: (d) => g('auto_voice')(d) + g('auto_recurring')(d) }, { label: 'A mano desde Pendientes', c: COL.org, get: g('manual_from_pending') }] }),
@@ -369,6 +447,62 @@ function build(id, ctx) {
         rank({ id: 'via', title: 'Desde dónde se clasifica a mano', sub: 'Movimientos clasificados por vía.', items: items(group(cl, (x) => x.via, (x) => x.movements), 'via') }),
         rank({ id: 'msource', title: 'De dónde salen los movimientos manuales', sub: 'Movimientos que no vinieron del correo.', c: COL.pur, items: items(group(mc, (x) => x.source, (x) => x.movements), 'msrc') }),
         rank({ id: 'rules', title: 'Reglas de comercio creadas', sub: 'Por origen.', c: COL.cyan, items: items(group(rules, (x) => x.origin, (x) => x.rules), 'origin') }),
+        table({ id: 'sheet', wide: true, title: 'Hoja de clasificar', sub: 'Cómo terminan la hoja suelta, la ráfaga y el bloque. «Con anteriores» y «con regla» sólo existen en bloque; «saltados», en ráfaga.', cols: [{ label: 'Modo', align: 'left', w: 'minmax(96px,1.3fr)' }, { label: 'Hojas' }, { label: 'Pers·día' }, { label: 'Movimientos' }, { label: 'Clasificados' }, { label: 'Etiquetados' }, { label: 'Saltados' }, { label: 'Terminadas' }, { label: 'Con anteriores' }, { label: 'Con regla' }], minW: '760px', rows: [...modes.entries()].sort((a, b) => b[1].sheets - a[1].sheets).map(([m, x]) => [{ v: lab('mode', m), fw: 500 }, N(x.sheets), N(x.installs), N(x.items), N(x.classified), N(x.tagged), m === 'burst' ? N(x.skipped) : '—', pctLow(pct(x.completed, x.sheets), 50), m === 'bulk' ? N(x.bulk_with_earlier) : '—', m === 'bulk' ? N(x.bulk_with_rule) : '—']) }),
+        bars(ctx, { id: 'undo', title: 'Clasificaciones deshechas', sub: 'Parte de lo clasificado desde la hoja, la ráfaga o la selección que se deshizo con el aviso.', meta: P(pct(undone, quick)), keys: days, fmt: P, tipFn: (d) => { const x = udm.get(d); return x ? fd(d) + ' · ' + P(x.pct_undone) + ' · ' + N(x.movements_undone) + ' de ' + N(x.movements_classified) : fd(d) + ' · sin datos'; }, series: [{ label: '% deshecho', c: COL.neg, get: (d) => num(udm.get(d) && udm.get(d).pct_undone) }] }),
+        bars(ctx, { id: 'backfill', title: 'Reglas puestas de golpe', sub: 'Movimientos sin categoría que se clasificaron solos al aplicar las reglas (p. ej. tras restaurar).', meta: N(sum(bf, 'movements')) + ' movimientos', keys: days, tipFn: (d) => { const x = bfm.get(d); return x ? fd(d) + ' · ' + N(x.movements) + ' movimientos en ' + N(x.runs) + (num(x.runs) === 1 ? ' vez' : ' veces') : fd(d) + ' · nada'; }, series: [{ label: 'Movimientos', c: COL.cyan, get: (d) => num(bfm.get(d) && bfm.get(d).movements) }] }),
+      ],
+    };
+  }
+
+  if (id === 'comercios') {
+    const md = inR(D.analytics_merchant_daily, st);
+    const bySrc = (s) => md.filter((x) => x.source === s);
+    const auto = sum(bySrc('auto'), 'movements'), arr = sum(bySrc('arrived'), 'movements'), man = sum(bySrc('manual'), 'movements');
+    const rec = sum(bySrc('reclassified'), 'movements'), corr = sum(bySrc('reclassified').filter((x) => x.engine), 'movements');
+    const came = auto + arr;
+    const people = sum(md.filter((x) => (x.source === 'auto' || x.source === 'arrived') && /(^|_)persona$/.test(x.merchant || '')), 'movements');
+    const src = (s) => perDay(bySrc(s), (x) => x.movements);
+    const rk = (D.analytics_merchant_ranking_30d || []).slice().sort((a, b) => num(b.arrived) + num(b.manual_from_pending) - num(a.arrived) - num(a.manual_from_pending));
+    const rc = (D.analytics_merchant_reclassified_30d || []).slice().sort((a, b) => num(b.movements) - num(a.movements));
+    const un = (D.analytics_merchant_unclassified_30d || []).slice().sort((a, b) => num(b.arrived) - num(a.arrived));
+    return {
+      kpis: [
+        kpi('Comercios distintos', N(new Set(md.map((x) => x.merchant)).size), 'en ' + R + ' días'),
+        kpi('Llegan ya clasificados', P(pct(auto, came)), N(auto) + ' de ' + N(came) + ' gastos del correo'),
+        kpi('Precisión automática', auto ? P(Math.round(1000 * (1 - corr / auto)) / 10) : '—', N(corr) + ' corregidos después', auto && corr / auto >= 0.1 ? 'var(--warn)' : null),
+        kpi('Clasificados a mano', N(man), N(rec) + ' reclasificados'),
+        kpi('Pagos a personas', P(pct(people, came)), 'Yape, Plin y transferencias'),
+      ],
+      cards: [
+        bars(ctx, { id: 'merchant-src', wide: true, title: 'Qué pasa con cada gasto por comercio', sub: 'Gastos del correo que llegaron con categoría o sin ella, y lo que después se clasificó o cambió a mano.', keys: days, series: [{ label: lab('msrcs', 'auto'), c: COL.a, get: src('auto') }, { label: lab('msrcs', 'arrived'), c: COL.mute, get: src('arrived') }, { label: lab('msrcs', 'manual'), c: COL.org, get: src('manual') }, { label: lab('msrcs', 'reclassified'), c: COL.neg, get: src('reclassified') }] }),
+        table({ id: 'merchant-rank', wide: true, title: 'Comercios', sub: '«Solos»: llegaron con categoría. «Precisión»: de lo que se clasificó solo, cuánto no se corrigió después.', meta: '30 días', cols: [{ label: 'Comercio', align: 'left', w: 'minmax(130px,1.8fr)' }, { label: 'Llegaron' }, { label: 'Solos' }, { label: '% solos' }, { label: 'Sin categoría' }, { label: 'A mano' }, { label: 'Reclasificados' }, { label: 'Precisión' }], minW: '700px', rows: rk.slice(0, 30).map((x) => [{ v: mlab(x.merchant), fw: 500 }, N(x.arrived), N(x.auto), pctLow(ok(x.pct_auto) ? +x.pct_auto : null, -1), N(x.arrived_unclassified), N(x.manual_from_pending), num(x.reclassified) ? { v: N(x.reclassified), color: 'var(--warn)' } : N(x.reclassified), pctLow(ok(x.pct_auto_kept) ? +x.pct_auto_kept : null, 90)]) }),
+        table({ id: 'merchant-reclass', title: 'Los más reclasificados', sub: 'De qué categoría a cuál y quién había puesto la primera.', meta: '30 días', cols: [{ label: 'Comercio', align: 'left', w: 'minmax(110px,1.4fr)' }, { label: 'De → a', align: 'left', w: 'minmax(140px,1.8fr)' }, { label: 'La puso', align: 'left', w: 'minmax(90px,1.1fr)' }, { label: 'Movs.' }, { label: 'Días' }], minW: '520px', rows: rc.slice(0, 15).map((x) => [{ v: mlab(x.merchant), fw: 500 }, { v: clab(x.from_category) + ' → ' + clab(x.to_category) }, { v: lab('engine', x.replaced), color: x.replaced === 'usuario' ? 'var(--text2)' : 'var(--warn)' }, N(x.movements), N(x.days)]) }),
+        rank({ id: 'merchant-auto', title: 'Los que se clasifican solos', sub: 'Con el motor y la categoría que les tocó.', meta: '30 días', limit: 15, c: COL.pos, items: (D.analytics_merchant_auto_30d || []).map((x) => ({ label: mlab(x.merchant), value: num(x.movements), note: lab('engine', x.engine) + ' · ' + clab(x.category) })) }),
+        table({ id: 'merchant-unclassified', wide: true, title: 'Llegan sin categoría', sub: 'Y la que la gente termina poniéndoles: candidatos a palabra clave o regla de fábrica.', meta: '30 días', cols: [{ label: 'Comercio', align: 'left', w: 'minmax(130px,1.6fr)' }, { label: 'Sin categoría' }, { label: 'Clasificados a mano' }, { label: 'Categoría que eligen', align: 'left', w: 'minmax(130px,1.6fr)' }, { label: 'Veces' }], minW: '560px', rows: un.slice(0, 20).map((x) => [{ v: mlab(x.merchant), fw: 500 }, N(x.arrived), N(x.classified_by_hand), { v: clab(x.top_category) }, N(x.top_category_movements)]) }),
+      ],
+    };
+  }
+
+  if (id === 'suscripciones') {
+    const sd = (D.analytics_subscription_detection_30d || []).map((x) => Object.assign({}, x, { n: num(x.confirmed) + num(x.rejected) }));
+    const sm = (D.analytics_subscription_merchants_30d || []).slice().sort((a, b) => num(b.confirmed) + num(b.rejected) - num(a.confirmed) - num(a.rejected));
+    const conf = sum(sd, 'confirmed'), tot = sum(sd, 'n');
+    const rate = (m) => items(new Map([...m.entries()].map(([k, v]) => [k, pct(v.confirmed, v.n)])), null, (k) => ({ note: N(m.get(k).confirmed) + ' de ' + N(m.get(k).n) }));
+    const byLevel = new Map(), byCad = new Map();
+    sd.forEach((x) => { tally(byLevel, x.level, ['confirmed', 'n'], x); tally(byCad, x.cadence, ['confirmed', 'n'], x); });
+    const withLabels = (list, d) => list.map((x) => Object.assign(x, { label: lab(d, x.key) }));
+    return {
+      kpis: [
+        kpi('Respondidas', N(tot), 'confirmadas o descartadas'),
+        kpi('Confirmadas', P(pct(conf, tot)), N(conf) + ' de ' + N(tot), ok(pct(conf, tot)) && pct(conf, tot) < 50 ? 'var(--warn)' : null),
+        kpi('Puntaje promedio', N0(wavg(sd, 'avg_score', 'n')), 'de 0 a 100'),
+        kpi('Como cuotas', N(sum(sd, 'as_installments')), 'marcadas en cuotas'),
+      ],
+      cards: [
+        rank({ id: 'sub-level', title: 'Acierto por nivel', sub: '«Detectada» se muestra como suscripción; «sugerida» sólo se propone.', max: 100, fmt: P, c: COL.pos, items: withLabels(rate(byLevel), 'level') }),
+        rank({ id: 'sub-cadence', title: 'Acierto por ritmo', sub: 'Parte de las detecciones que el usuario confirmó.', max: 100, fmt: P, c: COL.cyan, items: withLabels(rate(byCad), 'cadence') }),
+        table({ id: 'sub-detection', wide: true, title: 'Detector por nivel y ritmo', sub: 'Si «sugerida» se descarta mucho, el umbral está bajo.', cols: [{ label: 'Nivel', align: 'left', w: 'minmax(90px,1.2fr)' }, { label: 'Ritmo', align: 'left', w: 'minmax(80px,1fr)' }, { label: 'Confirmadas' }, { label: 'Descartadas' }, { label: '% confirmadas' }, { label: 'Puntaje' }, { label: 'En cuotas' }], minW: '560px', rows: sd.slice().sort((a, b) => b.n - a.n).map((x) => [{ v: lab('level', x.level), fw: 500 }, { v: lab('cadence', x.cadence) }, N(x.confirmed), N(x.rejected), pctLow(ok(x.pct_confirmed) ? +x.pct_confirmed : null, 50), N(x.avg_score), N(x.as_installments)]) }),
+        table({ id: 'sub-merchants', wide: true, title: 'Por comercio', sub: 'Cuáles se confirman y cuáles se descartan.', cols: [{ label: 'Comercio', align: 'left', w: 'minmax(130px,1.6fr)' }, { label: 'Categoría', align: 'left', w: 'minmax(100px,1.2fr)' }, { label: 'Confirmadas' }, { label: 'Descartadas' }, { label: '% confirmadas' }, { label: 'Puntaje' }], minW: '560px', rows: sm.slice(0, 30).map((x) => [{ v: mlab(x.merchant), fw: 500 }, { v: clab(x.category) }, N(x.confirmed), N(x.rejected), pctLow(pct(x.confirmed, num(x.confirmed) + num(x.rejected)), 50), N(x.avg_score)]) }),
       ],
     };
   }

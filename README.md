@@ -1,7 +1,8 @@
 # AgruPay · Analítica
 
 Panel web de la analítica de uso de AgruPay. Lee las vistas `analytics_*` de Supabase
-(`supabase/sql/agrupay_analytics_v16.sql` en el repo de la app) con la sesión de Google
+(`supabase/sql/agrupay_analytics_v16.sql` y, para Comercios, la hoja de clasificar y Suscripciones,
+`agrupay_analytics_v21_merchants.sql`, ambos en el repo de la app) con la sesión de Google
 de un administrador. Sin sesión muestra datos de ejemplo con la misma forma.
 
 **En vivo:** https://clmil0.github.io/agrupay-analytics/ · `?demo` fuerza los datos de ejemplo.
