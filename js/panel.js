@@ -5,7 +5,8 @@ const SB_URL = 'https://zxfeixwrruclypwjuhnl.supabase.co';
 const SB_KEY = 'sb_publishable_wJE6quWd2Lu_4rgYvF39CA_iur9-VeT';
 const LS_SESSION = 'agrupay-panel-session';
 const LS_UI = 'agrupay-panel-ui';
-const COL = { a: 'var(--accent)', gold: 'var(--gold)', pur: 'var(--purple)', cyan: 'var(--cyan)', pos: 'var(--pos)', org: 'var(--orange)', neg: 'var(--neg)', warn: 'var(--warn)', mute: 'var(--sep2)' };
+// Paleta crema / negro / naranja / azul; cada color es un token de styles.css (cambia en modo oscuro).
+const COL = { a: 'var(--c-orange)', ink: 'var(--c-ink)', blue: 'var(--c-blue)', gold: 'var(--c-yellow)', green: 'var(--c-green)', pur: 'var(--c-blue)', cyan: 'var(--c-green)', pos: 'var(--pos)', org: 'var(--c-ink)', neg: 'var(--neg)', warn: 'var(--warn)', mute: 'var(--c-sand)' };
 
 const SECTIONS = [
   { id: 'resumen', label: 'Resumen', desc: 'Usuarios activos, instalaciones nuevas y qué trae a la gente de vuelta.' },
@@ -73,8 +74,11 @@ const pct = (a, b) => (num(b) ? Math.round((num(a) / num(b)) * 1000) / 10 : null
 const mlab = (k) => { if (k == null) return '—'; const m = /^(?:(.+)_)?persona$/.exec(k); if (!m) return String(k); return m[1] ? ({ yape: 'Yape', plin: 'Plin' }[m[1]] || m[1].toUpperCase()) + ' · a persona' : 'A una persona'; };
 const clab = (k) => { if (k == null || k === '') return '—'; if (k === 'sin_clasificar') return 'Sin clasificar'; const s = String(k).replace(/_/g, ' '); return s[0].toUpperCase() + s.slice(1); };
 // Para porcentajes donde lo bajo es lo malo (precisión, acierto).
-const pctLow = (v, bad) => (!ok(v) ? { v: '—', color: 'var(--text3)' } : { v: P(v), color: v < bad ? 'var(--neg)' : 'var(--text)', fw: v < bad ? 600 : 400 });
-const pctCell = (v, bad) => (!ok(v) ? { v: '—', color: 'var(--text3)' } : { v: P(Math.round(v * 10) / 10), color: bad != null && v >= bad ? 'var(--neg)' : 'var(--text)', fw: bad != null && v >= bad ? 600 : 400 });
+const pctLow = (v, bad) => (!ok(v) ? { v: '—', color: 'var(--text3)' } : { v: P(v), n: +v, color: v < bad ? 'var(--neg)' : 'var(--text)', fw: v < bad ? 600 : 400 });
+// Celda numérica que guarda el valor crudo para las barras y el mapa de calor de las tablas.
+const nc = (v, f) => ({ v: (f || N)(v), n: ok(v) ? +v : null });
+const r1 = (v) => (ok(v) ? Math.round(+v * 10) / 10 : null);
+const pctCell = (v, bad) => (!ok(v) ? { v: '—', color: 'var(--text3)' } : { v: P(Math.round(v * 10) / 10), n: +v, color: bad != null && v >= bad ? 'var(--neg)' : 'var(--text)', fw: bad != null && v >= bad ? 600 : 400 });
 
 function makeDemo() {
   let seed = 11;
@@ -245,40 +249,137 @@ async function fetchView(view, filter, token) {
   return out;
 }
 
-function base(o) { return { id: o.id, title: o.title, sub: o.sub || '', meta: o.meta || '', span: o.wide ? '1 / -1' : 'auto', isBars: false, isRank: false, isTable: false, empty: false, bars: [], rows: [], trs: [], cols: [], axis: [], legend: [], tip: '', gap: '2px', grid: '1fr', minW: '0px', clear: null }; }
 
+// ── Tarjetas ─────────────────────────────────────────────────────────────
+// Cada tarjeta tiene un tipo (bars, area, rank, table, mix, gauge, tiles, rings)
+// y un tamaño en la cuadrícula de 12 columnas: full, lg (8), md (6) o sm (4).
+// `detail` es lo que se abre con «Ver detalle»: otra tarjeta, casi siempre una tabla.
+function base(o) {
+  return { id: o.id, title: o.title, sub: o.sub || '', meta: o.meta || '', size: o.wide ? 'full' : o.size || 'md', tone: o.tone || '', big: o.big || '', bigSub: o.bigSub || '', type: 'empty', detail: o.detail || null, dtitle: o.dtitle || 'Detalle', more: 0 };
+}
+
+// Tope «redondo» del eje: 1, 2, 2,5, 5 o 10 por potencia de diez.
+const nice = (v) => { if (!(v > 0)) return 1; const m = Math.pow(10, Math.floor(Math.log10(v))); return [1, 2, 2.5, 5, 10].map((k) => k * m).find((x) => x >= v); };
+const SHORT = (v) => (Math.abs(v) >= 1000 ? nf.format(Math.round(v / 100) / 10) + ' k' : nf.format(Math.round(v * 10) / 10));
+// Curva suave (Catmull-Rom) por los puntos, en el lienzo de 1000 × 300 del gráfico de área.
+function curve(P) {
+  const cy = (y) => Math.min(300, Math.max(0, y));
+  let d = 'M' + P[0][0].toFixed(1) + ',' + P[0][1].toFixed(1);
+  for (let i = 0; i < P.length - 1; i++) {
+    const p0 = P[i - 1] || P[i], p1 = P[i], p2 = P[i + 1], p3 = P[i + 2] || p2;
+    d += ' C' + [p1[0] + (p2[0] - p0[0]) / 6, cy(p1[1] + (p2[1] - p0[1]) / 6), p2[0] - (p3[0] - p1[0]) / 6, cy(p2[1] - (p3[1] - p1[1]) / 6), p2[0], p2[1]].map((x) => x.toFixed(1)).join(',');
+  }
+  return d;
+}
+
+// Serie por día (u hora, semana…). Con `area` dibuja líneas suaves sin apilar
+// (la primera con relleno); si no, barras apiladas.
 function bars(ctx, o) {
   const vals = o.keys.map((k) => o.series.map((s) => Math.max(0, num(s.get(k)))));
   const tots = vals.map((v) => v.reduce((a, b) => a + b, 0));
-  const max = Math.max(0, ...tots);
-  const empty = max === 0;
-  const sel = ctx.tip && ctx.tip.id === o.id ? ctx.tip.i : null;
   const fmt = o.fmt || N;
   const xl = o.xlab || fd;
   const n = o.keys.length;
-  const list = o.keys.map((k, i) => ({ h: tots[i] > 0 ? Math.max(2, (tots[i] / max) * 100) + '%' : '0%', op: sel == null || sel === i ? 1 : 0.4, on: () => ctx.setTip(o.id, i), segs: o.series.map((s, j) => ({ f: vals[i][j], c: s.c })).filter((x) => x.f > 0) }));
-  const tipAt = (i) => { const k = o.keys[i]; return o.tipFn ? o.tipFn(k, vals[i]) : xl(k) + ' · ' + o.series.map((s, j) => (o.series.length > 1 ? s.label + ' ' : '') + fmt(vals[i][j])).join(' · '); };
+  const multi = o.series.length > 1;
+  const stacked = multi && !o.area;
+  const tips = o.keys.map((k, i) => (o.tipFn ? o.tipFn(k, vals[i]) : xl(k) + ' · ' + o.series.map((s, j) => (multi ? s.label + ' ' : '') + fmt(vals[i][j])).join(' · ')));
+  const axis = n ? [xl(o.keys[0]), xl(o.keys[Math.floor((n - 1) / 2)]), xl(o.keys[n - 1])] : [];
+  // Detalle: la tabla completa, lo más reciente arriba cuando son días.
+  const rev = o.keys === ctx.days;
+  const order = o.keys.map((_, i) => i);
+  if (rev) order.reverse();
+  const detail = o.detail !== undefined ? o.detail : table({
+    id: o.id + '-d', show: Infinity,
+    cols: [{ label: o.klabel || 'Día', align: 'left', w: 'minmax(96px,1.3fr)' }].concat(o.series.map((s) => ({ label: s.label, bar: !multi }))).concat(stacked ? [{ label: 'Total', bar: true }] : []),
+    rows: order.map((i) => [{ v: xl(o.keys[i]), fw: 500 }].concat(vals[i].map((v) => ({ v: fmt(v), n: v }))).concat(stacked ? [{ v: fmt(tots[i]), n: tots[i], fw: 600 }] : [])),
+  });
+  const dtitle = o.dtitle || (rev ? 'Día por día' : 'Detalle');
+
+  if (o.area) {
+    const top = nice(Math.max(0, ...vals.flat()) * 1.12);
+    const X = (i) => (n > 1 ? (i / (n - 1)) * 1000 : 500);
+    const Y = (v) => 300 - (v / top) * 300;
+    const lines = o.series.map((s, j) => {
+      const P = vals.map((v, i) => [X(i), Y(v[j])]);
+      return { c: s.c, dash: !!s.dash, d: n ? curve(n > 1 ? P : [[0, P[0][1]], [1000, P[0][1]]]) : '' };
+    });
+    const avg = o.avgLine && n ? vals.reduce((a, v) => a + v[0], 0) / n : null;
+    const tf = o.fmt || SHORT;
+    return Object.assign(base(o), {
+      type: vals.flat().some((v) => v > 0) ? 'area' : 'empty', n, lines, tips, axis, detail, dtitle,
+      areaD: lines[0] && lines[0].d ? lines[0].d + ' L1000,300 L0,300 Z' : '',
+      avgY: avg != null ? Y(avg) / 3 : null, avgLabel: avg != null ? 'Promedio ' + fmt(r1(avg)) : '',
+      ticks: [top, top / 2, 0].map((v, i) => ({ top: i * 50, label: tf(v) })),
+      pts: vals.map((v, i) => ({ x: X(i) / 10, ys: v.map((x) => Y(x) / 3) })),
+      legend: multi || avg != null ? o.series.map((s) => ({ label: s.label, c: s.c, dash: !!s.dash })) : [],
+    });
+  }
+
+  const max = Math.max(0, ...tots);
   const hint = ctx.wide ? 'Pasa el cursor por una barra para ver el detalle' : 'Toca o desliza sobre las barras';
-  list.forEach((b, i) => { b.tip = tipAt(i); });
-  const tip = sel != null && sel < n ? list[sel].tip : hint;
-  return Object.assign(base(o), { isBars: !empty, empty, bars: list, tip, hint, clear: ctx.clearTip, axis: n ? [xl(o.keys[0]), xl(o.keys[Math.floor((n - 1) / 2)]), xl(o.keys[n - 1])] : [], gap: n > 45 ? '1px' : n > 20 ? '2px' : '4px', legend: o.series.length > 1 ? o.series.map((s) => ({ label: s.label, c: s.c })) : [] });
+  const list = o.keys.map((k, i) => ({ h: tots[i] > 0 ? Math.max(2, (tots[i] / max) * 100) + '%' : '0%', tip: tips[i], segs: o.series.map((s, j) => ({ f: vals[i][j], c: s.c })).filter((x) => x.f > 0) }));
+  return Object.assign(base(o), { type: max === 0 ? 'empty' : 'bars', bars: list, tip: hint, hint, axis, detail, dtitle, gap: n > 45 ? '2px' : n > 20 ? '3px' : '6px', legend: multi ? o.series.map((s) => ({ label: s.label, c: s.c })) : [] });
 }
 
+// Ranking de barras horizontales: la tarjeta muestra los primeros `show`, el detalle todos.
 function rank(o) {
-  let it = (o.items || []).filter((x) => ok(x.value));
+  const it = (o.items || []).filter((x) => ok(x.value));
   if (o.sort !== false) it.sort((a, b) => b.value - a.value);
-  if (o.limit) it = it.slice(0, o.limit);
   const max = o.max || Math.max(0, ...it.map((x) => x.value));
   const fmt = o.fmt || N;
-  const empty = !it.length || max === 0;
-  return Object.assign(base(o), { isRank: !empty, empty, rows: it.map((x) => ({ label: x.label, value: fmt(x.value), note: x.note || '', tone: x.tone || 'var(--text)', w: (max ? Math.min(100, (x.value / max) * 100) : 0) + '%', c: x.c || o.c || COL.a })) });
+  const rows = it.map((x, i) => ({ label: x.label, value: fmt(x.value), note: x.note || '', tone: x.tone || 'var(--text)', w: max ? Math.min(100, (x.value / max) * 100) : 0, c: x.c || o.c || (i === 0 ? COL.a : COL.ink) }));
+  const show = o.show || 7;
+  return Object.assign(base(o), { type: !rows.length || max === 0 ? 'empty' : 'rank', rows: rows.slice(0, show), allRows: rows, more: Math.max(0, rows.length - show) });
 }
 
+// Tabla. Una columna con `bar` dibuja una barrita bajo cada número y una con `heat`
+// tiñe la celda; ambas usan el valor crudo `n` de la celda (ver nc, pctCell).
 function table(o) {
   const grid = o.cols.map((c) => c.w || 'minmax(64px,1fr)').join(' ');
-  const trs = (o.rows || []).map((row) => ({ grid, cells: row.map((c, j) => { const x = c && typeof c === 'object' ? c : { v: c }; return { v: x.v == null ? '—' : x.v, align: o.cols[j].align || 'right', color: x.color || 'var(--text)', fw: x.fw || 400 }; }) }));
-  const empty = !trs.length;
-  return Object.assign(base(o), { isTable: !empty, empty, trs, grid, minW: o.minW || '0px', cols: o.cols.map((c) => ({ label: c.label, align: c.align || 'right' })) });
+  const rows = (o.rows || []).map((row) => row.map((c) => (c && typeof c === 'object' ? c : { v: c })));
+  // Barras contra el máximo; calor estirado entre el mínimo y el máximo de la columna, para que se note la diferencia.
+  const colN = o.cols.map((c, j) => rows.map((r) => (r[j] && ok(r[j].n) ? +r[j].n : null)).filter((v) => v != null));
+  const tops = colN.map((xs) => Math.max(0, ...xs)), lows = colN.map((xs) => Math.min(...xs));
+  const trs = rows.map((row) => ({ grid, cells: row.map((x, j) => {
+    const c = o.cols[j];
+    const has = ok(x.n);
+    const bar = c.bar && has && tops[j] ? Math.max(0, +x.n) / tops[j] : null;
+    const heat = c.heat && has ? (tops[j] > lows[j] ? (+x.n - lows[j]) / (tops[j] - lows[j]) : 1) : null;
+    return { v: x.v == null ? '—' : x.v, align: c.align || 'right', color: x.color || 'var(--text)', fw: x.fw || 400, heat, bar };
+  }) }));
+  const show = o.show || 6;
+  return Object.assign(base(o), { type: trs.length ? 'table' : 'empty', trs: trs.slice(0, show), allTrs: trs, more: Math.max(0, trs.length - show), grid, minW: o.minW || '0px', cols: o.cols.map((c) => ({ label: c.label, align: c.align || 'right' })) });
+}
+
+// Mezcla: una barra partida en bloques proporcionales y la lista con su parte.
+const MIXPAL = [COL.gold, COL.blue, COL.a, COL.ink, COL.green, COL.mute];
+function mix(o) {
+  const it = (o.items || []).filter((x) => ok(x.value) && x.value > 0);
+  if (o.sort !== false) it.sort((a, b) => b.value - a.value);
+  const tot = it.reduce((a, x) => a + x.value, 0);
+  const fmt = o.fmt || N;
+  const segs = it.map((x, i) => ({ label: x.label, value: fmt(x.value), f: x.value, pct: P(r1((x.value / tot) * 100)), note: x.note || '', c: x.c || MIXPAL[i % MIXPAL.length] }));
+  const show = o.show || 6;
+  return Object.assign(base(o), { type: tot ? 'mix' : 'empty', big: o.big || (tot ? fmt(tot) : ''), segs, rows: segs.slice(0, show), more: Math.max(0, segs.length - show) });
+}
+
+// Anillo grande para un porcentaje, en una tarjeta de color.
+function gauge(o) {
+  const v = ok(o.value) ? Math.max(0, Math.min(100, +o.value)) : null;
+  return Object.assign(base(Object.assign({ size: 'sm', tone: 'blue' }, o)), { type: v == null ? 'empty' : 'gauge', value: v, label: v == null ? '—' : nf.format(r1(v)) + '%', caption: o.caption || '', rows: o.rows || [] });
+}
+
+// Mosaicos oscuros (o naranjas, para lo que hay que mirar). Tocar uno abre el detalle.
+function tiles(o) {
+  const it = o.items || [];
+  const show = o.show || 8;
+  return Object.assign(base(o), { type: it.length ? 'tiles' : 'empty', tiles: it.slice(0, show), allTiles: it, more: Math.max(0, it.length - show) });
+}
+
+// Anillos pequeños, uno por porcentaje.
+function rings(o) {
+  const it = (o.items || []).filter((x) => ok(x.value));
+  return Object.assign(base(o), { type: it.length ? 'rings' : 'empty', rings: it.map((x) => ({ label: x.label, value: Math.max(0, Math.min(100, +x.value)), txt: P(r1(x.value)), c: x.c || COL.a })) });
 }
 
 const kpi = (label, value, sub, color) => ({ label, value, sub: sub || '', color: color || 'var(--text)' });
@@ -300,6 +401,8 @@ function build(id, ctx) {
     const wkm = new Map((D.analytics_weekly_active || []).map((x) => [String(x.week).slice(0, 10), x]));
     const src = inR(D.analytics_open_sources_daily, st);
     const hours = new Map((D.analytics_open_hours_30d || []).map((x) => [num(x.hour), num(x.opens)]));
+    const peak = [...hours.entries()].sort((a, b) => b[1] - a[1])[0];
+    const dv = (d, k) => num(dam.get(d) && dam.get(d)[k]);
     return {
       kpis: [
         kpi('DAU', N(last && last.active_installs), last ? fd(lastDay) + ' · promedio ' + N0(avg) : '—'),
@@ -310,11 +413,13 @@ function build(id, ctx) {
         kpi('Sesiones por persona', act ? N(Math.round((sum(da, 'sessions') / act) * 10) / 10) : '—', 'por día activo'),
       ],
       cards: [
-        bars(ctx, { id: 'dau', wide: true, title: 'Usuarios activos por día', sub: 'Instalaciones distintas con al menos un evento.', meta: 'promedio ' + N0(avg), keys: days, series: [{ label: 'Gratis', c: COL.a, get: (d) => { const x = dam.get(d); return x ? num(x.active_installs) - num(x.active_pro) : 0; } }, { label: 'Pro', c: COL.gold, get: (d) => num(dam.get(d) && dam.get(d).active_pro) }] }),
-        bars(ctx, { id: 'installs', title: 'Instalaciones nuevas', sub: 'Las que ya usaban la app antes de la analítica cuentan aparte.', meta: N(sum(ni, 'installs')) + ' en total', keys: days, series: [{ label: 'Nuevas', c: COL.a, get: (d) => num(nim.get(d) && nim.get(d).new_users) }, { label: 'Ya la usaban', c: COL.mute, get: (d) => num(nim.get(d) && nim.get(d).existing_users_updated) }] }),
-        bars(ctx, { id: 'wau', title: 'Activos por semana', sub: 'WAU. La semana empieza el lunes.', meta: '12 semanas', keys: weeks, xlab: (w) => fd(w), tipFn: (w, v) => 'Semana del ' + fd(w) + ' · ' + N(v[0] + v[1]) + ' activos · ' + N(v[1]) + ' Pro', series: [{ label: 'Gratis', c: COL.a, get: (w) => { const x = wkm.get(w); return x ? num(x.active_installs) - num(x.active_pro) : 0; } }, { label: 'Pro', c: COL.gold, get: (w) => num(wkm.get(w) && wkm.get(w).active_pro) }] }),
-        rank({ id: 'sources', title: 'Qué trae a la gente de vuelta', sub: 'Aperturas por origen.', items: items(group(src, (x) => x.source, (x) => x.opens), 'src') }),
-        bars(ctx, { id: 'hours', title: 'Hora de apertura', sub: 'Aperturas por hora, en hora de Lima.', meta: '30 días', keys: [...Array(24).keys()], xlab: (h) => h + ' h', tipFn: (h, v) => h + ':00 – ' + h + ':59 · ' + N(v[0]) + ' aperturas', series: [{ label: 'Aperturas', c: COL.a, get: (h) => hours.get(h) || 0 }] }),
+        bars(ctx, { id: 'dau', size: 'lg', area: true, avgLine: true, title: 'Usuarios activos por día', sub: 'Instalaciones distintas con al menos un evento.', big: N0(avg), bigSub: 'activos por día en promedio', keys: days, tipFn: (d, v) => fd(d) + ' · ' + N(v[0]) + ' activos · ' + N(v[1]) + ' Pro', series: [{ label: 'Activos', c: COL.a, get: (d) => dv(d, 'active_installs') }, { label: 'Pro', c: COL.ink, dash: true, get: (d) => dv(d, 'active_pro') }] }),
+        gauge({ id: 'pro-share', title: 'Pro entre los activos', value: avg ? (avgPro / avg) * 100 : null, caption: 'de los activos de cada día son Pro', rows: [{ label: 'Pro por día', value: N0(avgPro), c: COL.gold }, { label: 'Gratis por día', value: avg ? N0(avg - avgPro) : '—', c: '#fff' }],
+          dtitle: 'Día por día', detail: table({ id: 'pro-share-d', show: Infinity, cols: [{ label: 'Día', align: 'left', w: 'minmax(96px,1.3fr)' }, { label: 'Activos', bar: true }, { label: 'Pro' }, { label: '% Pro', heat: true }], rows: days.slice().reverse().filter((d) => dam.has(d)).map((d) => [{ v: fd(d), fw: 500 }, nc(dv(d, 'active_installs')), N(dv(d, 'active_pro')), pctCell(pct(dv(d, 'active_pro'), dv(d, 'active_installs')))]) }) }),
+        bars(ctx, { id: 'installs', title: 'Instalaciones nuevas', sub: 'Las que ya usaban la app antes de la analítica cuentan aparte.', big: N(sum(ni, 'new_users')), bigSub: 'nuevas · ' + N(sum(ni, 'installs')) + ' en total', keys: days, series: [{ label: 'Nuevas', c: COL.a, get: (d) => num(nim.get(d) && nim.get(d).new_users) }, { label: 'Ya la usaban', c: COL.mute, get: (d) => num(nim.get(d) && nim.get(d).existing_users_updated) }] }),
+        bars(ctx, { id: 'wau', title: 'Activos por semana', sub: 'WAU. La semana empieza el lunes.', meta: '12 semanas', klabel: 'Semana', keys: weeks, xlab: (w) => fd(w), tipFn: (w, v) => 'Semana del ' + fd(w) + ' · ' + N(v[0] + v[1]) + ' activos · ' + N(v[1]) + ' Pro', series: [{ label: 'Gratis', c: COL.ink, get: (w) => { const x = wkm.get(w); return x ? num(x.active_installs) - num(x.active_pro) : 0; } }, { label: 'Pro', c: COL.a, get: (w) => num(wkm.get(w) && wkm.get(w).active_pro) }] }),
+        mix({ id: 'sources', title: 'Qué trae a la gente de vuelta', sub: 'Aperturas por origen.', bigSub: 'aperturas en ' + R + ' días', items: items(group(src, (x) => x.source, (x) => x.opens), 'src') }),
+        bars(ctx, { id: 'hours', area: true, title: 'Hora de apertura', sub: 'Aperturas por hora, en hora de Lima.', meta: '30 días', big: peak ? peak[0] + ':00' : '', bigSub: 'la hora con más aperturas', klabel: 'Hora', keys: [...Array(24).keys()], xlab: (h) => h + ' h', tipFn: (h, v) => h + ':00 – ' + h + ':59 · ' + N(v[0]) + ' aperturas', series: [{ label: 'Aperturas', c: COL.blue, get: (h) => hours.get(h) || 0 }] }),
       ],
     };
   }
@@ -328,6 +433,7 @@ function build(id, ctx) {
     fun.forEach((x) => { const s = steps.get(x.step) || { step: x.step, o: num(x.step_order), n: 0 }; s.n += num(x.installs); steps.set(x.step, s); });
     const first = (steps.get('slide_1') || {}).n || Math.max(0, ...[...steps.values()].map((s) => s.n));
     const fin = (steps.get('finished') || {}).n;
+    const stepList = [...steps.values()].sort((a, b) => a.o - b.o);
     const nt = inR(D.analytics_notifications_daily, st);
     const sent = group(nt, (x) => x.type, (x) => x.sent);
     return {
@@ -338,10 +444,12 @@ function build(id, ctx) {
         kpi('Terminan el onboarding', first ? P(Math.round((fin / first) * 1000) / 10) : '—', first ? N(fin) + ' de ' + N(first) : '—'),
       ],
       cards: [
-        rank({ id: 'funnel', title: 'Embudo del onboarding', sub: 'Instalaciones nuevas de las cohortes del rango, por paso.', meta: 'desde el lun ' + fd(monday(st)), sort: false, max: first, items: [...steps.values()].sort((a, b) => a.o - b.o).map((s) => ({ label: lab('step', s.step), value: s.n, note: first ? P(Math.round((s.n / first) * 1000) / 10) : '' })) }),
-        rank({ id: 'milestones', title: 'Hitos de activación', sub: 'Parte de las instalaciones nuevas que llegó a cada hito y en cuánto tiempo (mediana).', meta: 'desde siempre', max: 100, fmt: P, items: (D.analytics_activation_milestones || []).map((x) => ({ label: lab('ms', x.milestone), value: num(x.pct_of_new_installs), note: FH(num(x.median_hours)) })) }),
-        table({ id: 'retention', wide: true, title: 'Retención por cohorte', sub: 'Por semana de instalación. «—» cuando la cohorte aún es muy joven para medirlo.', meta: '16 semanas', cols: [{ label: 'Semana', align: 'left', w: 'minmax(90px,1.4fr)' }, { label: 'Instalaciones' }, { label: 'D1' }, { label: 'D7' }, { label: 'D30' }], rows: rc.map((x) => [{ v: 'Lun ' + fd(x.cohort_week) }, N(x.installs), pctCell(x.d1_pct), pctCell(x.d7_pct), pctCell(x.d30_pct)]) }),
-        rank({ id: 'notifs', title: 'Notificaciones abiertas', sub: 'Sólo los avisos de importados se cuentan también al enviarse.', items: items(group(nt, (x) => x.type, (x) => x.opened), 'notif', (k) => ({ note: sent.get(k) ? 'de ' + N(sent.get(k)) + ' enviadas' : '' })) }),
+        rank({ id: 'funnel', size: 'lg', title: 'Embudo del onboarding', sub: 'Instalaciones nuevas de las cohortes del rango, por paso.', meta: 'desde el lun ' + fd(monday(st)), sort: false, show: 11, max: first, items: stepList.map((s) => ({ label: lab('step', s.step), value: s.n, note: first ? P(Math.round((s.n / first) * 1000) / 10) : '' })) }),
+        gauge({ id: 'onb', title: 'Terminan el onboarding', value: first ? (fin / first) * 100 : null, caption: 'de quienes vieron la primera pantalla', rows: [{ label: 'Empezaron', value: N(first), c: '#fff' }, { label: 'Terminaron', value: N(fin), c: COL.gold }],
+          detail: table({ id: 'onb-d', show: Infinity, cols: [{ label: 'Paso', align: 'left', w: 'minmax(140px,2fr)' }, { label: 'Instalaciones', bar: true }, { label: '% del inicio', heat: true }], rows: stepList.map((s) => [{ v: lab('step', s.step), fw: 500 }, nc(s.n), pctCell(pct(s.n, first))]) }) }),
+        table({ id: 'retention', wide: true, show: 8, title: 'Retención por cohorte', sub: 'Por semana de instalación. Más intenso, más gente volvió. «—» cuando la cohorte aún es muy joven para medirlo.', meta: '16 semanas', cols: [{ label: 'Semana', align: 'left', w: 'minmax(90px,1.4fr)' }, { label: 'Instalaciones', bar: true }, { label: 'D1', heat: true }, { label: 'D7', heat: true }, { label: 'D30', heat: true }], rows: rc.map((x) => [{ v: 'Lun ' + fd(x.cohort_week), fw: 500 }, nc(x.installs), pctCell(x.d1_pct), pctCell(x.d7_pct), pctCell(x.d30_pct)]) }),
+        rank({ id: 'milestones', title: 'Hitos de activación', sub: 'Parte de las instalaciones nuevas que llegó a cada hito y en cuánto tiempo (mediana).', meta: 'desde siempre', max: 100, fmt: P, c: COL.blue, items: (D.analytics_activation_milestones || []).map((x) => ({ label: lab('ms', x.milestone), value: num(x.pct_of_new_installs), note: FH(num(x.median_hours)) })) }),
+        rank({ id: 'notifs', tone: 'dark', title: 'Notificaciones abiertas', sub: 'Sólo los avisos de importados se cuentan también al enviarse.', items: items(group(nt, (x) => x.type, (x) => x.opened), 'notif', (k) => ({ note: sent.get(k) ? 'de ' + N(sent.get(k)) + ' enviadas' : '' })) }),
       ],
     };
   }
@@ -365,15 +473,15 @@ function build(id, ctx) {
         kpi('Funciones usadas', N(new Set(fu.map((x) => x.feature)).size), 'distintas'),
       ],
       cards: [
-        rank({ id: 'screens', title: 'Pantallas más vistas', sub: 'Visitas, sin contar la vuelta desde segundo plano.', limit: 12, items: items(views, null, (k) => ({ note: MIN(Math.round(mins.get(k) || 0)) })) }),
-        rank({ id: 'screen-min', title: 'Tiempo por pantalla', sub: 'Minutos sumados, incluidas las continuaciones.', limit: 12, c: COL.pur, fmt: (v) => MIN(Math.round(v)), items: items(mins) }),
+        rank({ id: 'screens', title: 'Pantallas más vistas', sub: 'Visitas, sin contar la vuelta desde segundo plano.', items: items(views, null, (k) => ({ note: MIN(Math.round(mins.get(k) || 0)) })) }),
+        rank({ id: 'screen-min', title: 'Tiempo por pantalla', sub: 'Minutos sumados, incluidas las continuaciones.', c: COL.blue, fmt: (v) => MIN(Math.round(v)), items: items(mins) }),
         rank({ id: 'taps', title: 'Dónde se toca más', sub: 'Toques por destino.', items: items(group(tapsR, (x) => x.target, (x) => x.taps), null, (k) => ({ note: N(sum(tapsR.filter((x) => x.target === k), 'installs')) + ' pers·día' })) }),
-        rank({ id: 'nav', title: 'Pestañas y secciones', sub: 'Cambios de pestaña y de la píldora.', c: COL.cyan, items: items(group(nav, (x) => (x.event === 'tab_select' ? 'Pestaña · ' : 'Sección · ') + x.target, (x) => x.selects)) }),
-        rank({ id: 'discovery', title: 'Descubrimiento de funciones', sub: 'Parte de las instalaciones que usó cada función alguna vez, y en cuántos días (mediana).', meta: 'desde siempre', max: 100, fmt: P, c: COL.pos, items: (D.analytics_feature_discovery || []).map((x) => ({ label: x.feature, value: num(x.pct_of_installs), note: ok(x.median_days_to_discover) ? N(x.median_days_to_discover) + ' d' : '' })) }),
-        rank({ id: 'features', title: 'Uso de funciones', sub: 'Cada uso cuenta.', limit: 16, items: items(group(fu, (x) => x.feature, (x) => x.uses)) }),
-        bars(ctx, { id: 'monthsback', title: 'Cuántos meses atrás se mira', sub: 'Lo más lejos que llegó cada persona.', meta: '30 días', keys: mbKeys, xlab: (m) => (m === 0 ? 'este mes' : m + ' m'), tipFn: (m, v) => (m === 0 ? 'Sólo este mes' : m + (m === 1 ? ' mes' : ' meses') + ' atrás') + ' · ' + N(v[0]) + ' personas', series: [{ label: 'Personas', c: COL.a, get: (m) => mbm.get(m) || 0 }] }),
-        rank({ id: 'chartmode', title: 'Modo del gráfico del Resumen', sub: 'Días, Semanas o Meses.', meta: '30 días', items: (D.analytics_chart_modes_30d || []).map((x) => ({ label: x.mode, value: num(x.choices), note: N(x.installs) + ' personas' })) }),
-        table({ id: 'mvcontrols', wide: true, title: 'Controles de Movimientos', sub: 'Mes, Tus cuentas, meses anteriores, pingüino y «Clasificar ›». «Todos» es elegir todos los meses; el % es lo clasificado del mes al tocar el pingüino.', meta: '30 días', cols: [{ label: 'Control', align: 'left', w: 'minmax(110px,1.4fr)' }, { label: 'Toques' }, { label: 'Personas' }, { label: 'Meses atrás' }, { label: 'Todos' }, { label: 'Ráfagas' }, { label: '% clasificado' }], minW: '600px', rows: (D.analytics_movements_controls_30d || []).slice().sort((a, b) => num(b.taps) - num(a.taps)).map((x) => [{ v: lab('ctrl', x.control), fw: 500 }, N(x.taps), N(x.installs), N(x.avg_months_back), num(x.all_months) ? N(x.all_months) : '—', num(x.bursts) ? N(x.bursts) : '—', P(x.avg_pct_classified)]) }),
+        rank({ id: 'nav', tone: 'dark', title: 'Pestañas y secciones', sub: 'Cambios de pestaña y de la píldora.', items: items(group(nav, (x) => (x.event === 'tab_select' ? 'Pestaña · ' : 'Sección · ') + x.target, (x) => x.selects)) }),
+        rank({ id: 'discovery', title: 'Descubrimiento de funciones', sub: 'Parte de las instalaciones que usó cada función alguna vez, y en cuántos días (mediana).', meta: 'desde siempre', max: 100, fmt: P, c: COL.green, items: (D.analytics_feature_discovery || []).map((x) => ({ label: x.feature, value: num(x.pct_of_installs), note: ok(x.median_days_to_discover) ? N(x.median_days_to_discover) + ' d' : '' })) }),
+        rank({ id: 'features', title: 'Uso de funciones', sub: 'Cada uso cuenta.', items: items(group(fu, (x) => x.feature, (x) => x.uses)) }),
+        bars(ctx, { id: 'monthsback', title: 'Cuántos meses atrás se mira', sub: 'Lo más lejos que llegó cada persona.', meta: '30 días', klabel: 'Meses atrás', keys: mbKeys, xlab: (m) => (m === 0 ? 'este mes' : m + ' m'), tipFn: (m, v) => (m === 0 ? 'Sólo este mes' : m + (m === 1 ? ' mes' : ' meses') + ' atrás') + ' · ' + N(v[0]) + ' personas', series: [{ label: 'Personas', c: COL.blue, get: (m) => mbm.get(m) || 0 }] }),
+        mix({ id: 'chartmode', title: 'Modo del gráfico del Resumen', sub: 'Días, Semanas o Meses.', meta: '30 días', bigSub: 'elecciones', items: (D.analytics_chart_modes_30d || []).map((x) => ({ label: x.mode, value: num(x.choices), note: N(x.installs) + ' personas' })) }),
+        table({ id: 'mvcontrols', wide: true, title: 'Controles de Movimientos', sub: 'Mes, Tus cuentas, meses anteriores, pingüino y «Clasificar ›». «Todos» es elegir todos los meses; el % es lo clasificado del mes al tocar el pingüino.', meta: '30 días', cols: [{ label: 'Control', align: 'left', w: 'minmax(110px,1.4fr)' }, { label: 'Toques', bar: true }, { label: 'Personas' }, { label: 'Meses atrás' }, { label: 'Todos' }, { label: 'Ráfagas' }, { label: '% clasificado' }], minW: '600px', rows: (D.analytics_movements_controls_30d || []).slice().sort((a, b) => num(b.taps) - num(a.taps)).map((x) => [{ v: lab('ctrl', x.control), fw: 500 }, nc(x.taps), N(x.installs), N(x.avg_months_back), num(x.all_months) ? N(x.all_months) : '—', num(x.bursts) ? N(x.bursts) : '—', P(x.avg_pct_classified)]) }),
       ],
     };
   }
@@ -383,6 +491,7 @@ function build(id, ctx) {
     const d3 = addD(T, -2);
     const banks = new Map();
     ph.forEach((x) => { const b = banks.get(x.bank) || { ins: 0, dup: 0, miss: 0, tot: 0, miss3: 0, tot3: 0 }; const e = num(x.emails); b.tot += e; if (x.result === 'inserted') b.ins += e; if (x.result === 'duplicate') b.dup += e; if (x.result === 'amount_missing') b.miss += e; if (String(x.day).slice(0, 10) >= d3) { b.tot3 += e; if (x.result === 'amount_missing') b.miss3 += e; } banks.set(x.bank, b); });
+    const bankList = [...banks.entries()].sort((a, b) => b[1].tot - a[1].tot);
     const tot = sum(ph, 'emails'), miss = sum(ph.filter((x) => x.result === 'amount_missing'), 'emails');
     const sr = inR(D.analytics_sync_runs_daily, st);
     const lat = inR(D.analytics_email_latency_daily, st);
@@ -393,6 +502,7 @@ function build(id, ctx) {
     const ins = perDay(ph.filter((x) => x.result === 'inserted'), (x) => x.emails), dup = perDay(ph.filter((x) => x.result === 'duplicate'), (x) => x.emails), ms = perDay(ph.filter((x) => x.result === 'amount_missing'), (x) => x.emails);
     const pctUnrec = sum(sr, 'checked') ? Math.round((sum(sr, 'unrecognized') / sum(sr, 'checked')) * 1000) / 10 : null;
     const ev = group(acc, (x) => x.event, (x) => x.events);
+    const minF = (v) => MIN(r1(v));
     return {
       kpis: [
         kpi('Correos reconocidos', N(tot), 'en ' + R + ' días'),
@@ -402,19 +512,22 @@ function build(id, ctx) {
         kpi('Permisos revocados', N(revoked), 'desconexiones «revoked»', revoked ? 'var(--warn)' : null),
       ],
       cards: [
-        table({ id: 'banks', wide: true, title: 'Salud de los lectores por banco', sub: 'Si sube «sin monto», ese banco cambió el formato de sus correos.', cols: [{ label: 'Banco', align: 'left', w: 'minmax(84px,1.3fr)' }, { label: 'Insertados' }, { label: 'Duplicados' }, { label: 'Sin monto' }, { label: '% sin monto' }, { label: 'Últimos 3 días' }], minW: '520px', rows: [...banks.entries()].sort((a, b) => b[1].tot - a[1].tot).map(([bank, b]) => [{ v: bank, fw: 500 }, N(b.ins), N(b.dup), N(b.miss), pctCell(b.tot ? (b.miss / b.tot) * 100 : null, 5), pctCell(b.tot3 ? (b.miss3 / b.tot3) * 100 : null, 5)]) }),
-        bars(ctx, { id: 'emails', title: 'Correos por día', sub: 'Por resultado del lector.', keys: days, series: [{ label: 'Insertados', c: COL.a, get: ins }, { label: 'Duplicados', c: COL.mute, get: dup }, { label: 'Sin monto', c: COL.neg, get: ms }] }),
-        bars(ctx, { id: 'latency', title: 'Minutos entre correo y movimiento', sub: 'Sólo lecturas normales, sin rangos pasados.', keys: days, tipFn: (d, v) => fd(d) + ' · p50 ' + MIN(Math.round(v[0] * 10) / 10) + ' · p90 ' + MIN(Math.round((v[0] + v[1]) * 10) / 10), series: [{ label: 'p50', c: COL.a, get: (d) => lp(d, 'p50_min') }, { label: 'p90', c: COL.mute, get: (d) => Math.max(0, lp(d, 'p90_min') - lp(d, 'p50_min')) }] }),
-        rank({ id: 'accounts', title: 'Conexiones de correo', sub: 'De abrir la ventana de Google o Microsoft a conectar.', sort: false, max: ev.get('account_connect_started'), items: ['account_connect_started', 'account_connected', 'account_connect_failed', 'account_disconnected'].map((k) => ({ label: lab('acct', k), value: ev.get(k) || 0, c: k === 'account_connect_failed' || k === 'account_disconnected' ? COL.warn : COL.a })) }),
-        rank({ id: 'acct-reasons', title: 'Por qué falla o se desconecta', sub: '«revoked»: el permiso dejó de valer.', c: COL.warn, items: items(group(acc.filter((x) => x.reason), (x) => lab('acct', x.event) + ' · ' + lab('prov', x.provider) + ' · ' + x.reason, (x) => x.events)) }),
-        rank({ id: 'syncruns', title: 'Lecturas del correo', sub: 'Lecturas que procesaron algo.', sort: false, items: [{ label: 'Lecturas', value: sum(sr, 'runs') }, { label: 'Correos revisados', value: sum(sr, 'checked') }, { label: 'Movimientos nuevos', value: sum(sr, 'new_movements') }, { label: 'Sin reconocer', value: sum(sr, 'unrecognized'), c: COL.warn, note: P(pctUnrec) }, { label: 'Descargas fallidas', value: sum(sr, 'failed_fetch'), c: COL.neg }] }),
+        tiles({ id: 'banks', wide: true, title: 'Salud de los lectores por banco', sub: 'Si sube «sin monto», ese banco cambió el formato de sus correos. En naranja, los que pasan del 5 %.', meta: N(banks.size) + ' bancos',
+          items: bankList.map(([bank, b]) => { const p = b.tot ? (b.miss / b.tot) * 100 : null, p3 = b.tot3 ? (b.miss3 / b.tot3) * 100 : null; const bad = Math.max(num(p), num(p3)) >= 5; return { kicker: (bad ? 'Revisar · ' : '') + 'últimos 3 días ' + P(r1(p3)), title: bank, sub: N(b.dup) + ' duplicados · ' + N(b.miss) + ' sin monto', value: N(b.ins), foot: 'insertados · ' + P(r1(p)) + ' sin monto', tone: bad ? 'orange' : 'dark' }; }),
+          detail: table({ id: 'banks-d', show: Infinity, cols: [{ label: 'Banco', align: 'left', w: 'minmax(84px,1.3fr)' }, { label: 'Insertados', bar: true }, { label: 'Duplicados' }, { label: 'Sin monto' }, { label: '% sin monto' }, { label: 'Últimos 3 días' }], minW: '520px', rows: bankList.map(([bank, b]) => [{ v: bank, fw: 500 }, nc(b.ins), N(b.dup), N(b.miss), pctCell(b.tot ? (b.miss / b.tot) * 100 : null, 5), pctCell(b.tot3 ? (b.miss3 / b.tot3) * 100 : null, 5)]) }) }),
+        bars(ctx, { id: 'emails', size: 'lg', title: 'Correos por día', sub: 'Por resultado del lector.', big: N(tot), bigSub: 'correos reconocidos', keys: days, series: [{ label: 'Insertados', c: COL.ink, get: ins }, { label: 'Duplicados', c: COL.mute, get: dup }, { label: 'Sin monto', c: COL.a, get: ms }] }),
+        rank({ id: 'accounts', size: 'sm', title: 'Conexiones de correo', sub: 'De abrir la ventana de Google o Microsoft a conectar.', sort: false, max: ev.get('account_connect_started'), items: ['account_connect_started', 'account_connected', 'account_connect_failed', 'account_disconnected'].map((k) => ({ label: lab('acct', k), value: ev.get(k) || 0, c: k === 'account_connect_failed' || k === 'account_disconnected' ? COL.a : COL.ink })) }),
+        bars(ctx, { id: 'latency', size: 'lg', area: true, title: 'Minutos entre correo y movimiento', sub: 'Sólo lecturas normales, sin rangos pasados.', big: MIN(lat.length ? r1(wavg(lat, 'p50_min', 'movements')) : null), bigSub: 'p50 del rango', keys: days, fmt: minF, tipFn: (d, v) => fd(d) + ' · p50 ' + minF(v[0]) + ' · p90 ' + minF(v[1]), series: [{ label: 'p50', c: COL.a, get: (d) => lp(d, 'p50_min') }, { label: 'p90', c: COL.ink, dash: true, get: (d) => lp(d, 'p90_min') }] }),
+        rank({ id: 'acct-reasons', size: 'sm', tone: 'dark', title: 'Por qué falla o se desconecta', sub: '«revoked»: el permiso dejó de valer.', show: 5, items: items(group(acc.filter((x) => x.reason), (x) => lab('acct', x.event) + ' · ' + lab('prov', x.provider) + ' · ' + x.reason, (x) => x.events)) }),
+        rank({ id: 'syncruns', wide: true, title: 'Lecturas del correo', sub: 'Lecturas que procesaron algo.', sort: false, items: [{ label: 'Lecturas', value: sum(sr, 'runs') }, { label: 'Correos revisados', value: sum(sr, 'checked'), c: COL.ink }, { label: 'Movimientos nuevos', value: sum(sr, 'new_movements'), c: COL.blue }, { label: 'Sin reconocer', value: sum(sr, 'unrecognized'), c: COL.warn, note: P(pctUnrec) }, { label: 'Descargas fallidas', value: sum(sr, 'failed_fetch'), c: COL.neg }] }),
       ],
     };
   }
 
   if (id === 'clasificacion') {
     const av = inR(D.analytics_auto_vs_manual_daily, st); const avm = byDay(av);
-    const autoT = sum(av, (x) => num(x.auto_rule) + num(x.auto_keyword) + num(x.auto_voice) + num(x.auto_recurring));
+    const autoOf = (x) => num(x.auto_rule) + num(x.auto_keyword) + num(x.auto_voice) + num(x.auto_recurring);
+    const autoT = sum(av, autoOf);
     const man = sum(av, 'manual_from_pending');
     const cl = inR(D.analytics_classification_daily, st);
     const rules = inR(D.analytics_rules_daily, st);
@@ -440,16 +553,18 @@ function build(id, ctx) {
         kpi('Deshecho tras clasificar', P(pct(undone, quick)), N(sum(ud, 'undos')) + ' veces «Deshacer»', pct(undone, quick) >= 10 ? 'var(--warn)' : null),
       ],
       cards: [
-        bars(ctx, { id: 'automan', wide: true, title: 'Automático contra manual', sub: 'Movimientos que llegaron ya clasificados y los que el usuario sacó de Pendientes.', keys: days, series: [{ label: 'Regla de comercio', c: COL.a, get: g('auto_rule') }, { label: 'Palabra clave', c: COL.cyan, get: g('auto_keyword') }, { label: 'Voz y recurrentes', c: COL.pur, get: (d) => g('auto_voice')(d) + g('auto_recurring')(d) }, { label: 'A mano desde Pendientes', c: COL.org, get: g('manual_from_pending') }] }),
-        rank({ id: 'accuracy', title: 'Precisión de cada motor', sub: 'De lo que clasificó, cuánto no cambió después el usuario.', meta: '30 días', max: 100, fmt: P, c: COL.pos, items: (D.analytics_auto_accuracy_30d || []).map((x) => ({ label: lab('engine', x.engine), value: num(x.pct_accuracy), note: N(x.corrected) + ' de ' + N(x.classified) + ' corregidos' })) }),
-        table({ id: 'suggestions', title: 'Sugerencias', sub: 'Mostradas una vez al día por comercio y pantalla.', meta: '30 días', cols: [{ label: 'Tipo', align: 'left', w: 'minmax(70px,1.2fr)' }, { label: 'Mostradas' }, { label: 'Aceptadas' }, { label: 'Descartadas' }, { label: '% aceptadas' }], minW: '380px', rows: sg.slice().sort((a, b) => num(b.shown) - num(a.shown)).map((x) => [{ v: lab('sugg', x.kind), fw: 500 }, N(x.shown), N(x.accepted), N(x.dismissed), pctCell(x.pct_accepted)]) }),
-        bars(ctx, { id: 'backlog', title: 'Atasco de Pendientes', sub: 'Pendientes del mes por persona (promedio). Si crece, la gente se rinde.', keys: days, tipFn: (d) => { const x = pbm.get(d); return x ? fd(d) + ' · promedio ' + N(x.avg_pending_month) + ' · p50 ' + N(x.p50_pending_month) + ' · p90 ' + N(x.p90_pending_month) : fd(d); }, series: [{ label: 'Promedio', c: COL.org, get: (d) => num(pbm.get(d) && pbm.get(d).avg_pending_month) }] }),
+        gauge({ id: 'auto-g', title: 'Clasificado automático', value: autoT + man ? (autoT / (autoT + man)) * 100 : null, caption: 'llegó clasificado, contra lo sacado a mano', rows: [{ label: 'Automático', value: N(autoT), c: COL.gold }, { label: 'A mano desde Pendientes', value: N(man), c: '#fff' }],
+          dtitle: 'Día por día', detail: table({ id: 'auto-g-d', show: Infinity, cols: [{ label: 'Día', align: 'left', w: 'minmax(96px,1.3fr)' }, { label: 'Automático', bar: true }, { label: 'A mano' }, { label: '% automático', heat: true }], rows: days.slice().reverse().filter((d) => avm.has(d)).map((d) => { const a = autoOf(avm.get(d)), m = g('manual_from_pending')(d); return [{ v: fd(d), fw: 500 }, nc(a), N(m), pctCell(pct(a, a + m))]; }) }) }),
+        bars(ctx, { id: 'automan', size: 'lg', title: 'Automático contra manual', sub: 'Movimientos que llegaron ya clasificados y los que el usuario sacó de Pendientes.', keys: days, series: [{ label: 'Regla de comercio', c: COL.a, get: g('auto_rule') }, { label: 'Palabra clave', c: COL.green, get: g('auto_keyword') }, { label: 'Voz y recurrentes', c: COL.blue, get: (d) => g('auto_voice')(d) + g('auto_recurring')(d) }, { label: 'A mano desde Pendientes', c: COL.ink, get: g('manual_from_pending') }] }),
+        rank({ id: 'accuracy', title: 'Precisión de cada motor', sub: 'De lo que clasificó, cuánto no cambió después el usuario.', meta: '30 días', max: 100, fmt: P, c: COL.green, items: (D.analytics_auto_accuracy_30d || []).map((x) => ({ label: lab('engine', x.engine), value: num(x.pct_accuracy), note: N(x.corrected) + ' de ' + N(x.classified) + ' corregidos' })) }),
+        table({ id: 'suggestions', title: 'Sugerencias', sub: 'Mostradas una vez al día por comercio y pantalla.', meta: '30 días', cols: [{ label: 'Tipo', align: 'left', w: 'minmax(70px,1.2fr)' }, { label: 'Mostradas', bar: true }, { label: 'Aceptadas' }, { label: 'Descartadas' }, { label: '% aceptadas', heat: true }], minW: '380px', rows: sg.slice().sort((a, b) => num(b.shown) - num(a.shown)).map((x) => [{ v: lab('sugg', x.kind), fw: 500 }, nc(x.shown), N(x.accepted), N(x.dismissed), pctCell(x.pct_accepted)]) }),
+        bars(ctx, { id: 'backlog', area: true, title: 'Atasco de Pendientes', sub: 'Pendientes del mes por persona. Si crece, la gente se rinde.', big: N(pbLast && pbLast.avg_pending_month), bigSub: 'promedio del último día', keys: days, tipFn: (d) => { const x = pbm.get(d); return x ? fd(d) + ' · promedio ' + N(x.avg_pending_month) + ' · p50 ' + N(x.p50_pending_month) + ' · p90 ' + N(x.p90_pending_month) : fd(d) + ' · sin datos'; }, series: [{ label: 'Promedio', c: COL.a, get: (d) => num(pbm.get(d) && pbm.get(d).avg_pending_month) }, { label: 'Mediana', c: COL.ink, dash: true, get: (d) => num(pbm.get(d) && pbm.get(d).p50_pending_month) }] }),
         rank({ id: 'via', title: 'Desde dónde se clasifica a mano', sub: 'Movimientos clasificados por vía.', items: items(group(cl, (x) => x.via, (x) => x.movements), 'via') }),
-        rank({ id: 'msource', title: 'De dónde salen los movimientos manuales', sub: 'Movimientos que no vinieron del correo.', c: COL.pur, items: items(group(mc, (x) => x.source, (x) => x.movements), 'msrc') }),
-        rank({ id: 'rules', title: 'Reglas de comercio creadas', sub: 'Por origen.', c: COL.cyan, items: items(group(rules, (x) => x.origin, (x) => x.rules), 'origin') }),
-        table({ id: 'sheet', wide: true, title: 'Hoja de clasificar', sub: 'Cómo terminan la hoja suelta, la ráfaga y el bloque. «Con anteriores» y «con regla» sólo existen en bloque; «saltados», en ráfaga.', cols: [{ label: 'Modo', align: 'left', w: 'minmax(96px,1.3fr)' }, { label: 'Hojas' }, { label: 'Pers·día' }, { label: 'Movimientos' }, { label: 'Clasificados' }, { label: 'Etiquetados' }, { label: 'Saltados' }, { label: 'Terminadas' }, { label: 'Con anteriores' }, { label: 'Con regla' }], minW: '760px', rows: [...modes.entries()].sort((a, b) => b[1].sheets - a[1].sheets).map(([m, x]) => [{ v: lab('mode', m), fw: 500 }, N(x.sheets), N(x.installs), N(x.items), N(x.classified), N(x.tagged), m === 'burst' ? N(x.skipped) : '—', pctLow(pct(x.completed, x.sheets), 50), m === 'bulk' ? N(x.bulk_with_earlier) : '—', m === 'bulk' ? N(x.bulk_with_rule) : '—']) }),
-        bars(ctx, { id: 'undo', title: 'Clasificaciones deshechas', sub: 'Parte de lo clasificado desde la hoja, la ráfaga o la selección que se deshizo con el aviso.', meta: P(pct(undone, quick)), keys: days, fmt: P, tipFn: (d) => { const x = udm.get(d); return x ? fd(d) + ' · ' + P(x.pct_undone) + ' · ' + N(x.movements_undone) + ' de ' + N(x.movements_classified) : fd(d) + ' · sin datos'; }, series: [{ label: '% deshecho', c: COL.neg, get: (d) => num(udm.get(d) && udm.get(d).pct_undone) }] }),
-        bars(ctx, { id: 'backfill', title: 'Reglas puestas de golpe', sub: 'Movimientos sin categoría que se clasificaron solos al aplicar las reglas (p. ej. tras restaurar).', meta: N(sum(bf, 'movements')) + ' movimientos', keys: days, tipFn: (d) => { const x = bfm.get(d); return x ? fd(d) + ' · ' + N(x.movements) + ' movimientos en ' + N(x.runs) + (num(x.runs) === 1 ? ' vez' : ' veces') : fd(d) + ' · nada'; }, series: [{ label: 'Movimientos', c: COL.cyan, get: (d) => num(bfm.get(d) && bfm.get(d).movements) }] }),
+        mix({ id: 'msource', title: 'De dónde salen los movimientos manuales', sub: 'Movimientos que no vinieron del correo.', bigSub: 'movimientos', items: items(group(mc, (x) => x.source, (x) => x.movements), 'msrc') }),
+        rank({ id: 'rules', tone: 'dark', title: 'Reglas de comercio creadas', sub: 'Por origen.', items: items(group(rules, (x) => x.origin, (x) => x.rules), 'origin') }),
+        table({ id: 'sheet', wide: true, title: 'Hoja de clasificar', sub: 'Cómo terminan la hoja suelta, la ráfaga y el bloque. «Con anteriores» y «con regla» sólo existen en bloque; «saltados», en ráfaga.', cols: [{ label: 'Modo', align: 'left', w: 'minmax(96px,1.3fr)' }, { label: 'Hojas', bar: true }, { label: 'Pers·día' }, { label: 'Movimientos' }, { label: 'Clasificados' }, { label: 'Etiquetados' }, { label: 'Saltados' }, { label: 'Terminadas', heat: true }, { label: 'Con anteriores' }, { label: 'Con regla' }], minW: '760px', rows: [...modes.entries()].sort((a, b) => b[1].sheets - a[1].sheets).map(([m, x]) => [{ v: lab('mode', m), fw: 500 }, nc(x.sheets), N(x.installs), N(x.items), N(x.classified), N(x.tagged), m === 'burst' ? N(x.skipped) : '—', pctLow(pct(x.completed, x.sheets), 50), m === 'bulk' ? N(x.bulk_with_earlier) : '—', m === 'bulk' ? N(x.bulk_with_rule) : '—']) }),
+        bars(ctx, { id: 'undo', area: true, title: 'Clasificaciones deshechas', sub: 'Parte de lo clasificado desde la hoja, la ráfaga o la selección que se deshizo con el aviso.', big: P(pct(undone, quick)), bigSub: 'deshecho en el rango', keys: days, fmt: P, tipFn: (d) => { const x = udm.get(d); return x ? fd(d) + ' · ' + P(x.pct_undone) + ' · ' + N(x.movements_undone) + ' de ' + N(x.movements_classified) : fd(d) + ' · sin datos'; }, series: [{ label: '% deshecho', c: COL.a, get: (d) => num(udm.get(d) && udm.get(d).pct_undone) }] }),
+        bars(ctx, { id: 'backfill', title: 'Reglas puestas de golpe', sub: 'Movimientos sin categoría que se clasificaron solos al aplicar las reglas (p. ej. tras restaurar).', big: N(sum(bf, 'movements')), bigSub: 'movimientos', keys: days, tipFn: (d) => { const x = bfm.get(d); return x ? fd(d) + ' · ' + N(x.movements) + ' movimientos en ' + N(x.runs) + (num(x.runs) === 1 ? ' vez' : ' veces') : fd(d) + ' · nada'; }, series: [{ label: 'Movimientos', c: COL.green, get: (d) => num(bfm.get(d) && bfm.get(d).movements) }] }),
       ],
     };
   }
@@ -474,11 +589,12 @@ function build(id, ctx) {
         kpi('Pagos a personas', P(pct(people, came)), 'Yape, Plin y transferencias'),
       ],
       cards: [
-        bars(ctx, { id: 'merchant-src', wide: true, title: 'Qué pasa con cada gasto por comercio', sub: 'Gastos del correo que llegaron con categoría o sin ella, y lo que después se clasificó o cambió a mano.', keys: days, series: [{ label: lab('msrcs', 'auto'), c: COL.a, get: src('auto') }, { label: lab('msrcs', 'arrived'), c: COL.mute, get: src('arrived') }, { label: lab('msrcs', 'manual'), c: COL.org, get: src('manual') }, { label: lab('msrcs', 'reclassified'), c: COL.neg, get: src('reclassified') }] }),
-        table({ id: 'merchant-rank', wide: true, title: 'Comercios', sub: '«Solos»: llegaron con categoría. «Precisión»: de lo que se clasificó solo, cuánto no se corrigió después.', meta: '30 días', cols: [{ label: 'Comercio', align: 'left', w: 'minmax(130px,1.8fr)' }, { label: 'Llegaron' }, { label: 'Solos' }, { label: '% solos' }, { label: 'Sin categoría' }, { label: 'A mano' }, { label: 'Reclasificados' }, { label: 'Precisión' }], minW: '700px', rows: rk.slice(0, 30).map((x) => [{ v: mlab(x.merchant), fw: 500 }, N(x.arrived), N(x.auto), pctLow(ok(x.pct_auto) ? +x.pct_auto : null, -1), N(x.arrived_unclassified), N(x.manual_from_pending), num(x.reclassified) ? { v: N(x.reclassified), color: 'var(--warn)' } : N(x.reclassified), pctLow(ok(x.pct_auto_kept) ? +x.pct_auto_kept : null, 90)]) }),
-        table({ id: 'merchant-reclass', title: 'Los más reclasificados', sub: 'De qué categoría a cuál y quién había puesto la primera.', meta: '30 días', cols: [{ label: 'Comercio', align: 'left', w: 'minmax(110px,1.4fr)' }, { label: 'De → a', align: 'left', w: 'minmax(140px,1.8fr)' }, { label: 'La puso', align: 'left', w: 'minmax(90px,1.1fr)' }, { label: 'Movs.' }, { label: 'Días' }], minW: '520px', rows: rc.slice(0, 15).map((x) => [{ v: mlab(x.merchant), fw: 500 }, { v: clab(x.from_category) + ' → ' + clab(x.to_category) }, { v: lab('engine', x.replaced), color: x.replaced === 'usuario' ? 'var(--text2)' : 'var(--warn)' }, N(x.movements), N(x.days)]) }),
-        rank({ id: 'merchant-auto', title: 'Los que se clasifican solos', sub: 'Con el motor y la categoría que les tocó.', meta: '30 días', limit: 15, c: COL.pos, items: (D.analytics_merchant_auto_30d || []).map((x) => ({ label: mlab(x.merchant), value: num(x.movements), note: lab('engine', x.engine) + ' · ' + clab(x.category) })) }),
-        table({ id: 'merchant-unclassified', wide: true, title: 'Llegan sin categoría', sub: 'Y la que la gente termina poniéndoles: candidatos a palabra clave o regla de fábrica.', meta: '30 días', cols: [{ label: 'Comercio', align: 'left', w: 'minmax(130px,1.6fr)' }, { label: 'Sin categoría' }, { label: 'Clasificados a mano' }, { label: 'Categoría que eligen', align: 'left', w: 'minmax(130px,1.6fr)' }, { label: 'Veces' }], minW: '560px', rows: un.slice(0, 20).map((x) => [{ v: mlab(x.merchant), fw: 500 }, N(x.arrived), N(x.classified_by_hand), { v: clab(x.top_category) }, N(x.top_category_movements)]) }),
+        gauge({ id: 'm-auto', tone: 'green', title: 'Llegan ya clasificados', value: pct(auto, came), caption: 'de los gastos del correo', rows: [{ label: lab('msrcs', 'auto'), value: N(auto), c: COL.gold }, { label: lab('msrcs', 'arrived'), value: N(arr), c: '#fff' }, { label: 'Corregidos después', value: N(corr), c: 'var(--c-orange)' }] }),
+        bars(ctx, { id: 'merchant-src', size: 'lg', title: 'Qué pasa con cada gasto por comercio', sub: 'Gastos del correo que llegaron con categoría o sin ella, y lo que después se clasificó o cambió a mano.', keys: days, series: [{ label: lab('msrcs', 'auto'), c: COL.blue, get: src('auto') }, { label: lab('msrcs', 'arrived'), c: COL.mute, get: src('arrived') }, { label: lab('msrcs', 'manual'), c: COL.ink, get: src('manual') }, { label: lab('msrcs', 'reclassified'), c: COL.a, get: src('reclassified') }] }),
+        table({ id: 'merchant-rank', wide: true, show: 8, title: 'Comercios', sub: '«Solos»: llegaron con categoría. «Precisión»: de lo que se clasificó solo, cuánto no se corrigió después.', meta: '30 días', cols: [{ label: 'Comercio', align: 'left', w: 'minmax(130px,1.8fr)' }, { label: 'Llegaron', bar: true }, { label: 'Solos' }, { label: '% solos', heat: true }, { label: 'Sin categoría' }, { label: 'A mano' }, { label: 'Reclasificados' }, { label: 'Precisión' }], minW: '700px', rows: rk.map((x) => [{ v: mlab(x.merchant), fw: 500 }, nc(x.arrived), N(x.auto), pctLow(ok(x.pct_auto) ? +x.pct_auto : null, -1), N(x.arrived_unclassified), N(x.manual_from_pending), num(x.reclassified) ? { v: N(x.reclassified), color: 'var(--warn)' } : N(x.reclassified), pctLow(ok(x.pct_auto_kept) ? +x.pct_auto_kept : null, 90)]) }),
+        table({ id: 'merchant-reclass', title: 'Los más reclasificados', sub: 'De qué categoría a cuál y quién había puesto la primera.', meta: '30 días', cols: [{ label: 'Comercio', align: 'left', w: 'minmax(110px,1.4fr)' }, { label: 'De → a', align: 'left', w: 'minmax(140px,1.8fr)' }, { label: 'La puso', align: 'left', w: 'minmax(90px,1.1fr)' }, { label: 'Movs.', bar: true }, { label: 'Días' }], minW: '520px', rows: rc.map((x) => [{ v: mlab(x.merchant), fw: 500 }, { v: clab(x.from_category) + ' → ' + clab(x.to_category) }, { v: lab('engine', x.replaced), color: x.replaced === 'usuario' ? 'var(--text2)' : 'var(--warn)' }, nc(x.movements), N(x.days)]) }),
+        rank({ id: 'merchant-auto', title: 'Los que se clasifican solos', sub: 'Con el motor y la categoría que les tocó.', meta: '30 días', c: COL.green, items: (D.analytics_merchant_auto_30d || []).map((x) => ({ label: mlab(x.merchant), value: num(x.movements), note: lab('engine', x.engine) + ' · ' + clab(x.category) })) }),
+        table({ id: 'merchant-unclassified', wide: true, tone: 'dark', title: 'Llegan sin categoría', sub: 'Y la que la gente termina poniéndoles: candidatos a palabra clave o regla de fábrica.', meta: '30 días', cols: [{ label: 'Comercio', align: 'left', w: 'minmax(130px,1.6fr)' }, { label: 'Sin categoría', bar: true }, { label: 'Clasificados a mano' }, { label: 'Categoría que eligen', align: 'left', w: 'minmax(130px,1.6fr)' }, { label: 'Veces' }], minW: '560px', rows: un.map((x) => [{ v: mlab(x.merchant), fw: 500 }, nc(x.arrived), N(x.classified_by_hand), { v: clab(x.top_category) }, N(x.top_category_movements)]) }),
       ],
     };
   }
@@ -499,10 +615,11 @@ function build(id, ctx) {
         kpi('Como cuotas', N(sum(sd, 'as_installments')), 'marcadas en cuotas'),
       ],
       cards: [
-        rank({ id: 'sub-level', title: 'Acierto por nivel', sub: '«Detectada» se muestra como suscripción; «sugerida» sólo se propone.', max: 100, fmt: P, c: COL.pos, items: withLabels(rate(byLevel), 'level') }),
-        rank({ id: 'sub-cadence', title: 'Acierto por ritmo', sub: 'Parte de las detecciones que el usuario confirmó.', max: 100, fmt: P, c: COL.cyan, items: withLabels(rate(byCad), 'cadence') }),
-        table({ id: 'sub-detection', wide: true, title: 'Detector por nivel y ritmo', sub: 'Si «sugerida» se descarta mucho, el umbral está bajo.', cols: [{ label: 'Nivel', align: 'left', w: 'minmax(90px,1.2fr)' }, { label: 'Ritmo', align: 'left', w: 'minmax(80px,1fr)' }, { label: 'Confirmadas' }, { label: 'Descartadas' }, { label: '% confirmadas' }, { label: 'Puntaje' }, { label: 'En cuotas' }], minW: '560px', rows: sd.slice().sort((a, b) => b.n - a.n).map((x) => [{ v: lab('level', x.level), fw: 500 }, { v: lab('cadence', x.cadence) }, N(x.confirmed), N(x.rejected), pctLow(ok(x.pct_confirmed) ? +x.pct_confirmed : null, 50), N(x.avg_score), N(x.as_installments)]) }),
-        table({ id: 'sub-merchants', wide: true, title: 'Por comercio', sub: 'Cuáles se confirman y cuáles se descartan.', cols: [{ label: 'Comercio', align: 'left', w: 'minmax(130px,1.6fr)' }, { label: 'Categoría', align: 'left', w: 'minmax(100px,1.2fr)' }, { label: 'Confirmadas' }, { label: 'Descartadas' }, { label: '% confirmadas' }, { label: 'Puntaje' }], minW: '560px', rows: sm.slice(0, 30).map((x) => [{ v: mlab(x.merchant), fw: 500 }, { v: clab(x.category) }, N(x.confirmed), N(x.rejected), pctLow(pct(x.confirmed, num(x.confirmed) + num(x.rejected)), 50), N(x.avg_score)]) }),
+        gauge({ id: 'sub-g', tone: 'green', title: 'Detecciones confirmadas', value: pct(conf, tot), caption: 'de lo que el usuario respondió', rows: [{ label: 'Confirmadas', value: N(conf), c: COL.gold }, { label: 'Descartadas', value: N(tot - conf), c: '#fff' }] }),
+        rank({ id: 'sub-level', size: 'sm', title: 'Acierto por nivel', sub: '«Detectada» se muestra como suscripción; «sugerida» sólo se propone.', max: 100, fmt: P, c: COL.green, items: withLabels(rate(byLevel), 'level') }),
+        rank({ id: 'sub-cadence', size: 'sm', title: 'Acierto por ritmo', sub: 'Parte de las detecciones que el usuario confirmó.', max: 100, fmt: P, c: COL.blue, items: withLabels(rate(byCad), 'cadence') }),
+        table({ id: 'sub-detection', wide: true, title: 'Detector por nivel y ritmo', sub: 'Si «sugerida» se descarta mucho, el umbral está bajo.', cols: [{ label: 'Nivel', align: 'left', w: 'minmax(90px,1.2fr)' }, { label: 'Ritmo', align: 'left', w: 'minmax(80px,1fr)' }, { label: 'Confirmadas', bar: true }, { label: 'Descartadas' }, { label: '% confirmadas', heat: true }, { label: 'Puntaje' }, { label: 'En cuotas' }], minW: '560px', rows: sd.slice().sort((a, b) => b.n - a.n).map((x) => [{ v: lab('level', x.level), fw: 500 }, { v: lab('cadence', x.cadence) }, nc(x.confirmed), N(x.rejected), pctLow(ok(x.pct_confirmed) ? +x.pct_confirmed : null, 50), N(x.avg_score), N(x.as_installments)]) }),
+        table({ id: 'sub-merchants', wide: true, show: 8, title: 'Por comercio', sub: 'Cuáles se confirman y cuáles se descartan.', cols: [{ label: 'Comercio', align: 'left', w: 'minmax(130px,1.6fr)' }, { label: 'Categoría', align: 'left', w: 'minmax(100px,1.2fr)' }, { label: 'Confirmadas', bar: true }, { label: 'Descartadas' }, { label: '% confirmadas', heat: true }, { label: 'Puntaje' }], minW: '560px', rows: sm.map((x) => [{ v: mlab(x.merchant), fw: 500 }, { v: clab(x.category) }, nc(x.confirmed), N(x.rejected), pctLow(pct(x.confirmed, num(x.confirmed) + num(x.rejected)), 50), N(x.avg_score)]) }),
       ],
     };
   }
@@ -513,6 +630,8 @@ function build(id, ctx) {
     const eng = (D.analytics_pro_engagement_30d || [])[0] || {};
     const pd = inR(D.analytics_paywall_daily, st);
     const shown = perDay(pd, (x) => x.shown), trials = perDay(pd, (x) => x.trials);
+    const pw = p30.slice().sort((a, b) => num(b.installs_shown) - num(a.installs_shown));
+    const best = Math.max(0, ...p30.map((x) => num(x.pct_conversion)));
     return {
       kpis: [
         kpi('Vieron el paywall', N(sh), '30 días'),
@@ -522,10 +641,13 @@ function build(id, ctx) {
         kpi('Funciones Pro por persona', N(eng.avg_features), 'promedio, 30 días'),
       ],
       cards: [
-        table({ id: 'paywall', title: 'Qué función vende', sub: 'Personas que vieron el paywall por cada función y cuántas probaron.', meta: '30 días', cols: [{ label: 'Función', align: 'left', w: 'minmax(96px,1.4fr)' }, { label: 'Vieron' }, { label: 'Probaron' }, { label: 'Conversión' }], rows: p30.slice().sort((a, b) => num(b.installs_shown) - num(a.installs_shown)).map((x) => [{ v: lab('pro', x.feature), fw: 500 }, N(x.installs_shown), N(x.installs_trial), pctCell(x.pct_conversion)]) }),
-        bars(ctx, { id: 'paywall-day', title: 'Paywall por día', sub: 'Veces mostrado y pruebas iniciadas.', keys: days, tipFn: (d) => fd(d) + ' · ' + N(shown(d)) + ' mostrado · ' + N(trials(d)) + ' pruebas', series: [{ label: 'Mostrado sin prueba', c: COL.a, get: (d) => Math.max(0, shown(d) - trials(d)) }, { label: 'Pruebas', c: COL.gold, get: trials }] }),
+        gauge({ id: 'conv-g', title: 'Paywall → prueba', value: sh ? (tr / sh) * 100 : null, caption: 'de quienes vieron el paywall lo probaron', rows: [{ label: 'Vieron el paywall', value: N(sh), c: '#fff' }, { label: 'Iniciaron la prueba', value: N(tr), c: COL.gold }] }),
+        bars(ctx, { id: 'paywall-day', size: 'lg', title: 'Paywall por día', sub: 'Veces mostrado y pruebas iniciadas.', keys: days, tipFn: (d) => fd(d) + ' · ' + N(shown(d)) + ' mostrado · ' + N(trials(d)) + ' pruebas', series: [{ label: 'Mostrado sin prueba', c: COL.ink, get: (d) => Math.max(0, shown(d) - trials(d)) }, { label: 'Pruebas', c: COL.a, get: trials }] }),
+        tiles({ id: 'paywall', wide: true, title: 'Qué función vende', sub: 'Personas que vieron el paywall por cada función y cuántas probaron. En naranja, la que mejor convierte.', meta: '30 días',
+          items: pw.map((x) => ({ kicker: N(x.installs_shown) + ' vieron', title: lab('pro', x.feature), sub: N(x.installs_trial) + ' probaron', value: P(x.pct_conversion), foot: 'conversión a prueba', tone: best > 0 && num(x.pct_conversion) === best ? 'orange' : 'dark' })),
+          detail: table({ id: 'paywall-d', show: Infinity, cols: [{ label: 'Función', align: 'left', w: 'minmax(96px,1.4fr)' }, { label: 'Vieron', bar: true }, { label: 'Probaron' }, { label: 'Conversión', heat: true }], rows: pw.map((x) => [{ v: lab('pro', x.feature), fw: 500 }, nc(x.installs_shown), N(x.installs_trial), pctCell(x.pct_conversion)]) }) }),
         rank({ id: 'prouse', title: 'Uso de funciones Pro', sub: 'Una vez al día por función, sólo siendo Pro. En personas·día.', c: COL.gold, items: items(group(inR(D.analytics_pro_feature_usage_daily, st), (x) => x.feature, (x) => x.installs), 'pro') }),
-        rank({ id: 'themes', title: 'Temas elegidos', sub: 'Personas que eligieron cada tema.', meta: '30 días', c: COL.pur, items: (D.analytics_themes_30d || []).map((x) => ({ label: x.theme, value: num(x.installs), note: N(x.changes) + ' cambios' })) }),
+        mix({ id: 'themes', title: 'Temas elegidos', sub: 'Personas que eligieron cada tema.', meta: '30 días', bigSub: 'personas', items: (D.analytics_themes_30d || []).map((x) => ({ label: x.theme, value: num(x.installs), note: N(x.changes) + ' cambios' })) }),
       ],
     };
   }
@@ -553,12 +675,13 @@ function build(id, ctx) {
         kpi('Face ID fallido', unT ? P(Math.round(((unT - unOk) / unT) * 1000) / 10) : '—', N(unT) + ' intentos'),
       ],
       cards: [
-        bars(ctx, { id: 'launch', title: 'Arranque', sub: 'Del toque en el ícono al primer dibujo.', keys: days, tipFn: (d, v) => fd(d) + ' · p50 ' + MS(v[0]) + ' · p90 ' + MS(v[0] + v[1]), series: [{ label: 'p50', c: COL.a, get: (d) => lv(d, 'p50_ms') }, { label: 'p90', c: COL.mute, get: (d) => Math.max(0, lv(d, 'p90_ms') - lv(d, 'p50_ms')) }] }),
-        bars(ctx, { id: 'stability', title: 'Crashes y cuelgues', sub: 'Por día, todas las versiones.', keys: days, series: [{ label: 'Crashes', c: COL.neg, get: perDay(sb, (x) => x.crashes) }, { label: 'Cuelgues (MetricKit)', c: COL.warn, get: perDay(sb, (x) => x.hangs_metrickit) }, { label: 'Hilo principal', c: COL.org, get: perDay(sb, (x) => x.main_hangs) }] }),
-        table({ id: 'errors', title: 'Errores', sub: 'Por dominio y código.', cols: [{ label: 'Dominio · código', align: 'left', w: 'minmax(150px,2fr)' }, { label: 'Errores' }, { label: 'Pers·día' }], rows: [...erg.entries()].sort((a, b) => b[1].e - a[1].e).map(([k, a]) => [{ v: k }, N(a.e), N(a.i)]) }),
-        rank({ id: 'unlock', title: 'Face ID', sub: 'Intentos de desbloqueo por resultado.', items: items(group(un, (x) => x.result, (x) => x.attempts), 'unlock', (k) => ({ c: k === 'ok' ? COL.pos : COL.warn })) }),
-        table({ id: 'metrickit', wide: true, title: 'Informe diario de iOS por versión', sub: 'Promedios de MetricKit.', cols: [{ label: 'Versión', align: 'left', w: 'minmax(70px,1fr)' }, { label: 'Informes' }, { label: 'Arranque' }, { label: 'Reanudar' }, { label: 'Cuelgue' }, { label: 'Memoria pico' }, { label: 'Salidas anómalas' }], minW: '620px', rows: [...mkv.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1)).map(([v, xs]) => [{ v, fw: 500 }, N(sum(xs, 'reports')), MS(wavg(xs, 'avg_launch_ms', 'reports')), MS(wavg(xs, 'avg_resume_ms', 'reports')), MS(wavg(xs, 'avg_hang_ms', 'reports')), N0(wavg(xs, 'avg_peak_memory_mb', 'reports')) + ' MB', N(sum(xs, 'fg_abnormal_exits'))]) }),
-        bars(ctx, { id: 'screenperf', title: 'Carga del Resumen', sub: 'Lo más pesado del Resumen (dashboard_catalog), una vez por arranque.', keys: days, tipFn: (d) => { const x = spm.get(d); return x ? fd(d) + ' · p50 ' + MS(x.p50_ms) + ' · p90 ' + MS(x.p90_ms) : fd(d); }, series: [{ label: 'p50', c: COL.cyan, get: (d) => num(spm.get(d) && spm.get(d).p50_ms) }] }),
+        bars(ctx, { id: 'launch', size: 'lg', area: true, title: 'Arranque', sub: 'Del toque en el ícono al primer dibujo.', big: MS(lp.length ? wavg(lp, 'p50_ms', 'launches') : null), bigSub: 'p50 del rango', keys: days, fmt: MS, tipFn: (d, v) => fd(d) + ' · p50 ' + MS(v[0]) + ' · p90 ' + MS(v[1]), series: [{ label: 'p50', c: COL.a, get: (d) => lv(d, 'p50_ms') }, { label: 'p90', c: COL.ink, dash: true, get: (d) => lv(d, 'p90_ms') }] }),
+        gauge({ id: 'faceid', tone: 'green', title: 'Face ID', value: pct(unOk, unT), caption: 'de los intentos de desbloqueo salen bien', rows: [{ label: 'Correctos', value: N(unOk), c: COL.gold }, { label: 'Fallidos o cancelados', value: N(unT - unOk), c: '#fff' }] }),
+        bars(ctx, { id: 'stability', title: 'Crashes y cuelgues', sub: 'Por día, todas las versiones.', big: N(crashes), bigSub: 'crashes · ' + N(hangs) + ' cuelgues', keys: days, series: [{ label: 'Crashes', c: COL.a, get: perDay(sb, (x) => x.crashes) }, { label: 'Cuelgues (MetricKit)', c: COL.gold, get: perDay(sb, (x) => x.hangs_metrickit) }, { label: 'Hilo principal', c: COL.ink, get: perDay(sb, (x) => x.main_hangs) }] }),
+        table({ id: 'errors', tone: 'dark', title: 'Errores', sub: 'Por dominio y código.', cols: [{ label: 'Dominio · código', align: 'left', w: 'minmax(150px,2fr)' }, { label: 'Errores', bar: true }, { label: 'Pers·día' }], rows: [...erg.entries()].sort((a, b) => b[1].e - a[1].e).map(([k, a]) => [{ v: k }, nc(a.e), N(a.i)]) }),
+        mix({ id: 'unlock', title: 'Face ID por resultado', sub: 'Intentos de desbloqueo.', bigSub: 'intentos', items: items(group(un, (x) => x.result, (x) => x.attempts), 'unlock', (k) => (k === 'ok' ? { c: COL.green } : {})) }),
+        bars(ctx, { id: 'screenperf', area: true, title: 'Carga del Resumen', sub: 'Lo más pesado del Resumen (dashboard_catalog), una vez por arranque.', keys: days, fmt: MS, tipFn: (d) => { const x = spm.get(d); return x ? fd(d) + ' · p50 ' + MS(x.p50_ms) + ' · p90 ' + MS(x.p90_ms) : fd(d) + ' · sin datos'; }, series: [{ label: 'p50', c: COL.green, get: (d) => num(spm.get(d) && spm.get(d).p50_ms) }, { label: 'p90', c: COL.ink, dash: true, get: (d) => num(spm.get(d) && spm.get(d).p90_ms) }] }),
+        table({ id: 'metrickit', wide: true, title: 'Informe diario de iOS por versión', sub: 'Promedios de MetricKit.', cols: [{ label: 'Versión', align: 'left', w: 'minmax(70px,1fr)' }, { label: 'Informes', bar: true }, { label: 'Arranque' }, { label: 'Reanudar' }, { label: 'Cuelgue' }, { label: 'Memoria pico' }, { label: 'Salidas anómalas' }], minW: '620px', rows: [...mkv.entries()].sort((a, b) => (a[0] < b[0] ? 1 : -1)).map(([v, xs]) => [{ v, fw: 500 }, nc(sum(xs, 'reports')), MS(wavg(xs, 'avg_launch_ms', 'reports')), MS(wavg(xs, 'avg_resume_ms', 'reports')), MS(wavg(xs, 'avg_hang_ms', 'reports')), N0(wavg(xs, 'avg_peak_memory_mb', 'reports')) + ' MB', N(sum(xs, 'fg_abnormal_exits'))]) }),
       ],
     };
   }
@@ -566,9 +689,12 @@ function build(id, ctx) {
   if (id === 'adopcion') {
     const a = (D.analytics_adoption_latest || [])[0] || {};
     const F = [['pct_gmail', 'Gmail conectado'], ['pct_outlook', 'Outlook conectado'], ['pct_notifications', 'Notificaciones'], ['pct_with_rules', 'Con reglas de comercio'], ['pct_budget', 'Presupuesto'], ['pct_app_lock', 'Face ID'], ['pct_with_friends', 'Con amigos'], ['pct_widgets', 'Widgets'], ['pct_pro', 'Pro']];
+    const RC = [COL.a, COL.blue, COL.ink, COL.green, COL.gold];
+    const list = F.filter(([k]) => a[k] != null).map(([k, l]) => ({ label: l, value: num(a[k]) })).sort((x, y) => y.value - x.value);
     return {
       kpis: [kpi('Instalaciones con foto', N(a.installs), 'últimos 14 días'), kpi('Reglas por persona', N(a.avg_rules), 'promedio'), kpi('Gmail conectado', P(a.pct_gmail), ''), kpi('Pro', P(a.pct_pro), '')],
-      cards: [rank({ id: 'adoption', wide: true, title: 'Adopción de ajustes', sub: 'Parte de las instalaciones con cada ajuste activo en su foto diaria más reciente.', max: 100, fmt: P, items: F.map(([k, l]) => ({ label: l, value: a[k] == null ? null : num(a[k]), c: k === 'pct_pro' ? COL.gold : COL.a })) })],
+      cards: [rings({ id: 'adoption', wide: true, title: 'Adopción de ajustes', sub: 'Parte de las instalaciones con cada ajuste activo en su foto diaria más reciente.', items: list.map((x, i) => Object.assign(x, { c: RC[i % RC.length] })),
+        detail: table({ id: 'adoption-d', show: Infinity, cols: [{ label: 'Ajuste', align: 'left', w: 'minmax(140px,2fr)' }, { label: '% de instalaciones', heat: true }, { label: 'Instalaciones aprox.' }], rows: list.map((x) => [{ v: x.label, fw: 500 }, pctCell(x.value), ok(a.installs) ? N0((x.value / 100) * num(a.installs)) : '—']) }) })],
     };
   }
 
@@ -581,11 +707,10 @@ function build(id, ctx) {
     return {
       kpis: [kpi('Versión más usada', top ? top[0] : '—', top && tot ? P(Math.round((top[1] / tot) * 1000) / 10) : ''), kpi('Instalaciones', N(tot), '7 días'), kpi('En App Store', tot ? P(Math.round((as / tot) * 1000) / 10) : '—', 'el resto en TestFlight')],
       cards: [
-        rank({ id: 'versions', title: 'Por versión', sub: 'Instalaciones activas en 7 días.', fmt: N, items: items(byV, null, (k, val) => ({ note: tot ? P(Math.round((val / tot) * 1000) / 10) : '' })) }),
-        table({ id: 'versions-ch', title: 'Por versión y canal', sub: 'Una instalación puede aparecer en dos versiones si actualizó.', cols: [{ label: 'Versión', align: 'left', w: 'minmax(70px,1fr)' }, { label: 'Canal', align: 'left', w: 'minmax(90px,1fr)' }, { label: 'Instalaciones' }, { label: '%' }], rows: v.slice().sort((a, b) => num(b.installs) - num(a.installs)).map((x) => [{ v: x.app_version, fw: 500 }, { v: lab('channel', x.channel) }, N(x.installs), pctCell(tot ? (num(x.installs) / tot) * 100 : null)]) }),
+        mix({ id: 'versions', title: 'Por versión', sub: 'Instalaciones activas en 7 días.', bigSub: 'instalaciones', items: items(byV) }),
+        table({ id: 'versions-ch', title: 'Por versión y canal', sub: 'Una instalación puede aparecer en dos versiones si actualizó.', cols: [{ label: 'Versión', align: 'left', w: 'minmax(70px,1fr)' }, { label: 'Canal', align: 'left', w: 'minmax(90px,1fr)' }, { label: 'Instalaciones', bar: true }, { label: '%' }], rows: v.slice().sort((a, b) => num(b.installs) - num(a.installs)).map((x) => [{ v: x.app_version, fw: 500 }, { v: lab('channel', x.channel) }, nc(x.installs), pctCell(tot ? (num(x.installs) / tot) * 100 : null)]) }),
       ],
     };
   }
   return { kpis: [], cards: [] };
 }
-

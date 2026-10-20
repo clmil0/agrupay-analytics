@@ -4,6 +4,39 @@
 
 const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+// Íconos de trazo en 24 × 24.
+const IC = {
+  users: 'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75',
+  download: 'M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3',
+  target: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 18a6 6 0 1 0 0-12 6 6 0 0 0 0 12zM12 14a2 2 0 1 0 0-4 2 2 0 0 0 0 4z',
+  clock: 'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20zM12 6v6l4 2',
+  alert: 'M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01',
+  mail: 'M4 4h16a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2zM22 6l-10 7L2 6',
+  star: 'M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z',
+  tag: 'M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82zM7 7h.01',
+  store: 'M3 9l1.5-5h15L21 9M3 9v11h18V9M3 9h18M9 20v-6h6v6',
+  layers: 'M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5',
+  chart: 'M12 20V10M18 20V4M6 20v-4',
+  arrow: 'M7 17L17 7M7 7h10v10',
+  close: 'M18 6L6 18M6 6l12 12',
+  refresh: 'M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15',
+  logout: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
+};
+const svg = (k, s) => `<svg width="${s || 18}" height="${s || 18}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${IC[k]}"></path></svg>`;
+// Ícono de cada KPI según su etiqueta.
+const kIcon = (l) =>
+  /crash|cuelg|error|fallid|revoc|sin monto|sin reconocer|deshecho|sin usar/i.test(l) ? 'alert'
+  : /instal/i.test(l) ? 'download'
+  : /arranque|latencia|minut|tiempo/i.test(l) ? 'clock'
+  : /correo|gmail/i.test(l) ? 'mail'
+  : /\bpro\b|paywall|prueba/i.test(l) ? 'star'
+  : /regla|clasific|sugerenc|pendiente/i.test(l) ? 'tag'
+  : /comercio|pagos/i.test(l) ? 'store'
+  : /versi/i.test(l) ? 'layers'
+  : /retenci|onboarding|conversi|precisi|confirm|respond|puntaje|cuotas/i.test(l) ? 'target'
+  : /dau|wau|mau|activos|persona|sesion|visita/i.test(l) ? 'users'
+  : 'chart';
+
 class App {
   constructor(root) {
     this.root = root;
@@ -15,10 +48,14 @@ class App {
     this.state = { section: ui.section || 'resumen', range: ui.range || 30, wide: window.innerWidth >= 900, mode: !this.forceDemo && this.session() ? 'loading' : 'demo', data: null, email: null, notice: this.hashNotice || null, updatedAt: null, demoChosen: !!ui.demo };
     this.cards = new Map();
     this.sheet = false;
+    this.detail = null;
+    this.animKey = null;
     window.addEventListener('resize', () => { const w = window.innerWidth >= 900; if (w !== this.state.wide) this.setState({ wide: w }); });
     window.addEventListener('scroll', () => this.onScroll(), { passive: true });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && this.detail) this.openDetail(null); });
     root.addEventListener('click', (e) => this.onClick(e));
     root.addEventListener('mouseover', (e) => this.onHover(e));
+    root.addEventListener('mousemove', (e) => this.onMove(e));
     root.addEventListener('mouseout', (e) => this.onLeave(e));
     root.addEventListener('pointerdown', (e) => this.onPointer(e, 'down'));
     root.addEventListener('pointermove', (e) => this.onPointer(e, 'move'));
@@ -137,6 +174,8 @@ class App {
       else this.go(id);
     }
     else if (a === 'range') { const n = +el.dataset.n; this.setState({ range: n }); this.saveUI({ range: n }); }
+    else if (a === 'detail') this.openDetail(el.dataset.id);
+    else if (a === 'close') this.openDetail(null);
     else if (a === 'login') this.login();
     else if (a === 'logout') this.logout();
     else if (a === 'reload') { this.setSheet(false); this.load(); }
@@ -144,7 +183,7 @@ class App {
     else if (a === 'sheet') this.setSheet(el.dataset.open === '1');
     else if (a === 'tipclear') this.clearTip(el.closest('[data-card]'));
   }
-  go(id) { window.scrollTo(0, 0); this.setState({ section: id }); this.saveUI({ section: id }); }
+  go(id) { this.detail = null; window.scrollTo(0, 0); this.setState({ section: id }); this.saveUI({ section: id }); }
   // Pestaña activa en móvil: las cuatro principales o «Más» para el resto.
   tab() { const id = this.state.section; return MAIN_TABS.includes(id) ? id : 'mas'; }
   // La hoja de cuenta se abre y cierra sin volver a dibujar, para que se anime.
@@ -152,49 +191,84 @@ class App {
     this.sheet = open;
     this.root.querySelectorAll('.m-sheet, .m-backdrop').forEach((x) => x.classList.toggle('open', open));
   }
+  // El detalle se dibuja aparte, sin rehacer la página (que repetiría las animaciones).
+  openDetail(id) { this.detail = id; this.paintDetail(true); }
+  paintDetail(anim) {
+    const host = this.root.querySelector('[data-dlg]');
+    const c = this.detail ? this.cards.get(this.detail) : null;
+    if (!c) this.detail = null;
+    document.documentElement.classList.toggle('noscroll', !!c);
+    if (host) host.innerHTML = c ? renderDetail(c, !this.state.wide, anim) : '';
+    if (c && anim) { const b = host.querySelector('.dlg .icon-btn'); if (b) b.focus({ preventScroll: true }); }
+  }
   onScroll() {
     const nav = this.root.querySelector('.m-nav');
     if (nav) nav.classList.toggle('scrolled', window.scrollY > 30);
   }
-  // Móvil: tocar o deslizar el dedo sobre las barras recorre el detalle.
+  // Móvil: tocar o deslizar el dedo sobre las barras o el área recorre el detalle.
   // touch-action: pan-y deja el desplazamiento vertical a la página.
   onPointer(e, kind) {
     if (this.state.wide) return;
-    const plot = e.target.closest('[data-plot]');
     if (kind === 'down') {
+      const plot = e.target.closest('[data-plot],[data-area]');
       if (!plot) return;
       try { plot.setPointerCapture(e.pointerId); } catch (_) {}
       this.drag = plot;
     }
-    if (!this.drag || (plot && plot !== this.drag && kind === 'down')) return;
     const p = this.drag;
+    if (!p) return;
+    if (p.hasAttribute('data-area')) { this.areaAt(p, e.clientX); return; }
     const r = p.getBoundingClientRect();
     const n = p.children.length;
     const i = Math.max(0, Math.min(n - 1, Math.floor(((e.clientX - r.left) / r.width) * n)));
     if (p.children[i]) this.showTip(p.children[i]);
   }
   onHover(e) { const bar = e.target.closest('[data-bar]'); if (bar) this.showTip(bar); }
+  onMove(e) { if (!this.state.wide) return; const area = e.target.closest('[data-area]'); if (area) this.areaAt(area, e.clientX); }
   onLeave(e) {
     const plot = e.target.closest('[data-plot]');
     if (plot && !plot.contains(e.relatedTarget)) this.clearTip(plot.closest('[data-card]'));
+    const area = e.target.closest('[data-area]');
+    if (area && !area.contains(e.relatedTarget)) { const hv = area.querySelector('.hv'); if (hv) hv.classList.remove('on'); }
   }
   showTip(bar) {
     const sec = bar.closest('[data-card]');
-    const card = this.cards.get(sec.dataset.card);
-    if (!card) return;
+    const card = sec && this.cards.get(sec.dataset.card);
+    if (!card || !card.bars) return;
     const i = +bar.dataset.bar;
-    sec.querySelectorAll('[data-bar]').forEach((b, j) => { b.style.opacity = j === i ? 1 : 0.4; });
+    sec.querySelectorAll('[data-bar]').forEach((b, j) => { b.style.opacity = j === i ? 1 : 0.35; });
     const tip = sec.querySelector('[data-tip]');
     tip.textContent = card.bars[i].tip;
     tip.classList.add('on');
   }
   clearTip(sec) {
     const card = sec && this.cards.get(sec.dataset.card);
-    if (!card) return;
+    if (!card || !card.bars) return;
     sec.querySelectorAll('[data-bar]').forEach((b) => { b.style.opacity = 1; });
     const tip = sec.querySelector('[data-tip]');
     tip.textContent = card.hint;
     tip.classList.remove('on');
+  }
+  // Gráfico de área: línea vertical, un punto por serie y la etiqueta oscura con el valor.
+  areaAt(el, x) {
+    const sec = el.closest('[data-card]');
+    const c = sec && this.cards.get(sec.dataset.card);
+    if (!c || !c.pts) return;
+    const r = el.getBoundingClientRect();
+    const i = Math.max(0, Math.min(c.n - 1, Math.round(((x - r.left) / r.width) * (c.n - 1))));
+    const p = c.pts[i];
+    const hv = el.querySelector('.hv');
+    hv.classList.add('on');
+    hv.style.setProperty('--x', p.x + '%');
+    hv.querySelectorAll('.hv-dot').forEach((d, j) => { d.style.top = p.ys[j] + '%'; });
+    const t = c.tips[i];
+    const k = t.indexOf(' · ');
+    const tip = hv.querySelector('.hv-tip');
+    tip.querySelector('small').textContent = k < 0 ? '' : t.slice(0, k);
+    tip.querySelector('b').textContent = k < 0 ? t : t.slice(k + 3);
+    const y = Math.min(...p.ys);
+    tip.style.top = y + '%';
+    tip.style.transform = 'translate(' + (p.x < 14 ? -6 : p.x > 86 ? -94 : -50) + '%,' + (y > 20 ? 'calc(-100% - 14px)' : '14px') + ')';
   }
 
   // ── Dibujo ─────────────────────────────────────────────────────────────
@@ -210,51 +284,60 @@ class App {
     const range = S.range;
     const days = [];
     for (let i = range - 1; i >= 0; i--) days.push(addD(today, -i));
-    const ctx = { D: data, today, start: days[0], days, range, tip: null, wide: S.wide, setTip: () => {}, clearTip: null };
+    const ctx = { D: data, today, start: days[0], days, range, wide: S.wide };
     let built;
     let buildError = null;
     try { built = build(sec.id, ctx); } catch (e) { console.error(e); buildError = e; built = { kpis: [], cards: [] }; }
     this.cards = new Map(built.cards.map((c) => [c.id, c]));
     const t = S.updatedAt ? S.updatedAt.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }) : '';
-    const status = loading ? { dot: 'var(--accent)', text: 'Cargando…' } : live ? { dot: 'var(--pos)', text: S.email + (t ? ' · ' + t : '') } : { dot: 'var(--warn)', text: 'Datos de ejemplo' };
+    const status = loading ? { dot: 'var(--c-blue)', text: 'Cargando…' } : live ? { dot: 'var(--pos)', text: S.email + (t ? ' · ' + t : '') } : { dot: 'var(--c-orange)', text: 'Datos de ejemplo' };
     const footer = (live || loading ? 'En vivo desde las vistas analytics_* de Supabase.' : 'Datos de ejemplo con la misma forma que las vistas analytics_*. Entra con una cuenta de analytics_admins para ver los reales.') + ' Hora de Lima; excluye el canal debug.';
-    return { loading, live, range, built, buildError, status, footer };
+    // Las animaciones de entrada sólo corren al cambiar de sección, rango o datos.
+    const key = [sec.id, range, S.mode, S.wide].join('|');
+    const enter = key !== this.animKey;
+    this.animKey = key;
+    return { loading, live, range, built, buildError, status, footer, enter };
   }
 
   render() {
+    if (this.state.mode === 'loading') this.detail = null;
     this.root.className = this.state.wide ? 'app' : 'app m';
-    if (!this.state.wide) { this.renderMobile(); return; }
+    if (this.state.wide) this.renderDesktop(); else this.renderMobile();
+    this.paintDetail(false);
+  }
+
+  renderDesktop() {
     const S = this.state;
     const sec = SECTIONS.find((s) => s.id === S.section) || SECTIONS[0];
-    const { loading, live, range, built, buildError, status, footer } = this.view(sec);
+    const { loading, live, range, built, buildError, status, footer, enter } = this.view(sec);
     document.title = sec.label + ' · AgruPay Analítica';
-
-    const nav = SECTIONS.map((s) => `<button class="side-btn${s.id === sec.id ? ' on' : ''}" data-act="go" data-id="${esc(s.id)}">${esc(s.label)}</button>`).join('');
+    const nav = SECTIONS.map((s) => `<button class="${s.id === sec.id ? 'on' : ''}" data-act="go" data-id="${esc(s.id)}">${esc(s.label)}</button>`).join('');
+    const who = live && S.email ? S.email.trim()[0].toUpperCase() : '';
 
     this.root.innerHTML = `
-      <aside class="side">
-        <div class="brand"><div class="brand-name">AgruPay</div><div class="brand-sub">Analítica de uso</div></div>
-        <nav class="side-nav">${nav}</nav>
-        <div class="side-foot">Hora de Lima · semana desde el lunes · sin canal debug</div>
-      </aside>
-      <main class="main">
-        <div class="content">
-          <div class="head">
-            <div class="head-text"><h1>${esc(sec.label)}</h1><div class="desc">${esc(sec.desc)}</div></div>
-            <div class="controls">
-              ${!sec.fixed ? `<div class="seg">${[7, 30, 90].map((n) => `<button class="${n === range ? 'on' : ''}" data-act="range" data-n="${n}">${n} días</button>`).join('')}</div>` : ''}
-              <div class="status"><span class="dot" style="background:${status.dot}"></span><span class="status-text">${esc(status.text)}</span></div>
-              ${S.mode === 'demo' && !this.forceDemo ? `<button class="btn primary" data-act="login">Entrar con Google</button>` : ''}
-              ${live || loading ? `<button class="btn" data-act="reload"${loading ? ' disabled' : ''}>Actualizar</button><button class="btn muted" data-act="logout">Salir</button>` : ''}
-            </div>
+      <div class="shell${enter ? ' enter' : ''}">
+        <header class="top anim" style="--i:0">
+          <div class="brand"><div class="logo">A</div><div class="brand-name">agrupay<span>analítica</span></div></div>
+          <div class="top-right">
+            <div class="status-pill" title="${esc(status.text)}"><span class="dot" style="background:${status.dot}"></span><span class="status-text">${esc(status.text)}</span></div>
+            ${S.mode === 'demo' && !this.forceDemo ? `<button class="pill primary" data-act="login">Entrar con Google</button>` : ''}
+            ${live || loading ? `<button class="round" data-act="reload" title="Actualizar" aria-label="Actualizar"${loading ? ' disabled' : ''}>${svg('refresh', 17)}</button><button class="round" data-act="logout" title="Salir" aria-label="Salir">${svg('logout', 17)}</button>` : ''}
+            ${who ? `<div class="avatar" title="${esc(S.email)}">${esc(who)}</div>` : ''}
           </div>
-          ${S.notice ? `<div class="notice">${esc(S.notice)}</div>` : ''}
-          ${buildError ? `<div class="notice">No se pudo armar esta sección: ${esc(buildError.message)}</div>` : ''}
-          <div class="kpis"${loading ? ' aria-busy="true"' : ''}>${built.kpis.map(loading ? renderKpiSkeleton : renderKpi).join('')}</div>
-          <div class="cards"${loading ? ' aria-busy="true"' : ''}>${built.cards.map((c) => (loading ? renderCardSkeleton(c) : renderCard(c))).join('')}</div>
-          <div class="footer">${esc(footer)}</div>
-        </div>
-      </main>`;
+        </header>
+        <nav class="tabs anim" style="--i:1">${nav}</nav>
+        <section class="hero anim" style="--i:2">
+          <div class="hero-text"><h1>${esc(sec.label)}</h1><div class="desc">${esc(sec.desc)}</div></div>
+          ${!sec.fixed ? `<div class="seg">${[7, 30, 90].map((n) => `<button class="${n === range ? 'on' : ''}" data-act="range" data-n="${n}">${n} días</button>`).join('')}</div>` : ''}
+        </section>
+        ${S.notice ? `<div class="notice">${esc(S.notice)}</div>` : ''}
+        ${buildError ? `<div class="notice">No se pudo armar esta sección: ${esc(buildError.message)}</div>` : ''}
+        <section class="kpis"${loading ? ' aria-busy="true"' : ''}>${built.kpis.map((k, i) => (loading ? renderKpiSkeleton(k, i + 3) : renderKpi(k, i + 3))).join('')}</section>
+        <section class="grid"${loading ? ' aria-busy="true"' : ''}>${built.cards.map((c, i) => (loading ? renderCardSkeleton(c, i + 6) : renderCard(c, false, i + 6))).join('')}</section>
+        <div class="footer">${esc(footer)}</div>
+      </div>
+      <div data-dlg></div>`;
+    if (enter) { const on = this.root.querySelector('.tabs .on'); if (on) on.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
   }
 
   // ── Móvil (< 900 px): app de iPhone con barra de pestañas ──────────────
@@ -265,7 +348,7 @@ class App {
       this.root.innerHTML = `<div class="m-login">
         <div class="m-login-hero">
           <div class="m-logo"><i></i><i></i><i></i></div>
-          <div class="m-login-titles"><div class="m-login-name">AgruPay</div><div class="m-login-sub">Analítica de uso</div></div>
+          <div class="m-login-titles"><div class="m-login-name">agrupay</div><div class="m-login-sub">Analítica de uso</div></div>
         </div>
         <div class="m-login-actions">
           ${S.notice ? `<div class="notice">${esc(S.notice)}</div>` : ''}
@@ -273,13 +356,13 @@ class App {
           <button class="m-btn link" data-act="demo">Ver datos de ejemplo</button>
           <div class="m-login-note">Los datos reales necesitan una cuenta en analytics_admins.</div>
         </div>
-      </div>`;
+      </div><div data-dlg></div>`;
       return;
     }
 
     const sec = SECTIONS.find((s) => s.id === S.section) || null;
     const tab = this.tab();
-    const { loading, live, range, built, buildError, status, footer } = this.view(sec || SECTIONS[0]);
+    const { loading, live, range, built, buildError, status, footer, enter } = this.view(sec || SECTIONS[0]);
     const short = loading ? 'Cargando' : live ? 'En vivo' : 'Ejemplo';
     const dot = (c) => `<span class="dot" style="background:${c}"></span>`;
     const chev = '<span class="m-chev"></span>';
@@ -287,23 +370,23 @@ class App {
 
     let body;
     if (sec) {
-      body = `<div class="m-head"><h1>${esc(sec.label)}</h1><div class="desc">${esc(sec.desc)}</div></div>
-        ${!sec.fixed ? `<div class="m-pad"><div class="m-seg">${[7, 30, 90].map((n) => `<button class="${n === range ? 'on' : ''}" data-act="range" data-n="${n}">${n} días</button>`).join('')}</div></div>` : ''}
+      body = `<div class="m-head anim" style="--i:0"><h1>${esc(sec.label)}</h1><div class="desc">${esc(sec.desc)}</div></div>
+        ${!sec.fixed ? `<div class="m-pad anim" style="--i:1"><div class="m-seg">${[7, 30, 90].map((n) => `<button class="${n === range ? 'on' : ''}" data-act="range" data-n="${n}">${n} días</button>`).join('')}</div></div>` : ''}
         ${S.notice ? `<div class="m-pad"><div class="notice">${esc(S.notice)}</div></div>` : ''}
         ${buildError ? `<div class="m-pad"><div class="notice">No se pudo armar esta sección: ${esc(buildError.message)}</div></div>` : ''}
-        <div class="kpis m-pad"${loading ? ' aria-busy="true"' : ''}>${built.kpis.map(loading ? renderKpiSkeleton : renderKpi).join('')}</div>
-        <div class="cards m-pad"${loading ? ' aria-busy="true"' : ''}>${built.cards.map((c) => (loading ? renderCardSkeleton(c) : renderCard(c, true))).join('')}</div>
+        <div class="kpis m-pad"${loading ? ' aria-busy="true"' : ''}>${built.kpis.map((k, i) => (loading ? renderKpiSkeleton(k, i + 2) : renderKpi(k, i + 2))).join('')}</div>
+        <div class="grid m-pad"${loading ? ' aria-busy="true"' : ''}>${built.cards.map((c, i) => (loading ? renderCardSkeleton(c, i + 4) : renderCard(c, true, i + 4))).join('')}</div>
         <div class="footer m-pad">${esc(footer)}</div>`;
     } else {
-      const PAL = ['var(--accent)', 'var(--gold)', 'var(--neg)', 'var(--pos)', 'var(--cyan)'];
+      const PAL = ['#d6451b', '#2b4f9e', '#17171a', '#2f6b55', '#c99a12'];
       const more = SECTIONS.filter((s) => !MAIN_TABS.includes(s.id));
-      body = `<div class="m-head"><h1>Más</h1></div>
+      body = `<div class="m-head anim" style="--i:0"><h1>Más</h1></div>
         ${S.notice ? `<div class="m-pad"><div class="notice">${esc(S.notice)}</div></div>` : ''}
-        <div class="m-group">${more.map((s, i) => `<button class="m-row" data-act="go" data-id="${esc(s.id)}">
+        <div class="m-group anim" style="--i:1">${more.map((s, i) => `<button class="m-row" data-act="go" data-id="${esc(s.id)}">
           <span class="m-badge" style="background:${PAL[i % PAL.length]}">${esc(s.label[0])}</span>
           <span class="m-row-text"><span class="m-row-title">${esc(s.label)}</span><span class="m-row-sub">${esc(s.desc)}</span></span>${chev}
         </button>`).join('')}</div>
-        <div class="m-group"><button class="m-row m-account" data-act="sheet" data-open="1">${dot(status.dot)}<span class="m-row-title grow">${esc(status.text)}</span><span class="m-row-aside">Cuenta</span>${chev}</button></div>
+        <div class="m-group anim" style="--i:2"><button class="m-row m-account" data-act="sheet" data-open="1">${dot(status.dot)}<span class="m-row-title grow">${esc(status.text)}</span><span class="m-row-aside">Cuenta</span>${chev}</button></div>
         <div class="m-foot">Hora de Lima · semana desde el lunes · sin canal debug</div>`;
     }
 
@@ -316,7 +399,7 @@ class App {
     ];
 
     this.root.innerHTML = `
-      <main class="m-scroll">${body}</main>
+      <main class="m-scroll${enter ? ' enter' : ''}">${body}</main>
       <header class="m-nav${window.scrollY > 30 ? ' scrolled' : ''}">
         <div class="m-nav-row">
           <div>${tab === 'mas' && sec ? `<button class="m-back" data-act="go" data-id="mas"><span></span>Más</button>` : ''}</div>
@@ -332,69 +415,164 @@ class App {
         <div class="m-status">${dot(status.dot)}<span>${esc(status.text)}</span></div>
         ${S.mode === 'demo' ? `<button class="m-btn primary" data-act="login">Entrar con Google</button>` : `<div class="m-sheet-actions"><button class="m-btn" data-act="reload"${loading ? ' disabled' : ''}>Actualizar</button><button class="m-btn danger" data-act="logout">Salir</button></div>`}
         <div class="m-sheet-foot">${esc(footer)}</div>
-      </div>`;
+      </div>
+      <div data-dlg></div>`;
   }
 }
 
 const MAIN_TABS = ['resumen', 'activacion', 'uso', 'correo'];
 
-function renderKpi(k) {
-  return `<div class="kpi"><div class="kpi-label">${esc(k.label)}</div><div class="kpi-value" style="color:${esc(k.color)}">${esc(k.value)}</div><div class="kpi-sub">${esc(k.sub)}</div></div>`;
+function renderKpi(k, i) {
+  return `<div class="kpi anim" style="--i:${i}"><div class="kpi-ic">${svg(kIcon(k.label), 19)}</div><div class="kpi-tx"><div class="kpi-value" style="color:${esc(k.color)}">${esc(k.value)}</div><div class="kpi-label">${esc(k.label)}</div>${k.sub ? `<div class="kpi-sub">${esc(k.sub)}</div>` : ''}</div></div>`;
 }
 
-// Esqueletos: el título y la descripción son fijos de la sección; los valores
-// se reemplazan por bloques con brillo.
-function renderKpiSkeleton(k) {
-  return `<div class="kpi"><div class="kpi-label">${esc(k.label)}</div><div class="sk sk-value"></div><div class="sk sk-line" style="width:60%"></div></div>`;
+// Esqueletos: el título de cada tarjeta es fijo de la sección; los valores
+// se reemplazan por bloques con brillo de la misma forma.
+function renderKpiSkeleton(k, i) {
+  return `<div class="kpi anim" style="--i:${i}"><div class="kpi-ic">${svg(kIcon(k.label), 19)}</div><div class="kpi-tx"><div class="sk sk-value"></div><div class="kpi-label">${esc(k.label)}</div></div></div>`;
 }
 
-function renderCardSkeleton(c) {
+function renderCardSkeleton(c, i) {
+  const t = c.type;
+  const lines = (n) => `<div class="sk-rows">${Array.from({ length: n }, (_, j) => `<div class="sk sk-line" style="width:${92 - j * 9}%"></div>`).join('')}</div>`;
   let body;
-  if (c.isBars) {
-    const n = Math.min(c.bars.length, 30);
-    body = `<div class="chart"><div class="sk sk-line" style="width:45%"></div><div class="plot sk-plot">${Array.from({ length: n }, (_, i) => `<div class="sk sk-bar" style="height:${35 + 45 * Math.abs(Math.sin(i * 0.7))}%"></div>`).join('')}</div></div>`;
-  } else if (c.isTable) {
-    body = `<div class="sk-rows">${Array.from({ length: Math.min(Math.max(c.trs.length, 3), 6) }, () => `<div class="sk sk-line"></div>`).join('')}</div>`;
-  } else {
-    body = `<div class="rank">${Array.from({ length: Math.min(Math.max(c.rows.length, 3), 6) }, (_, i) => `<div class="rrow"><div class="sk sk-line" style="width:${70 - i * 7}%"></div><div class="sk sk-track"></div></div>`).join('')}</div>`;
-  }
-  return `<section class="card" style="grid-column:${esc(c.span)}">
-    <div class="card-head"><div class="card-titles"><div class="card-title">${esc(c.title)}</div><div class="card-sub">${esc(c.sub)}</div></div></div>
+  if (t === 'bars' || t === 'area') body = `<div class="plot sk-plot">${Array.from({ length: 30 }, (_, j) => `<div class="sk sk-bar" style="height:${35 + 45 * Math.abs(Math.sin(j * 0.7))}%"></div>`).join('')}</div>`;
+  else if (t === 'gauge') body = `<div class="gauge"><div class="sk sk-ring"></div></div>${lines(2)}`;
+  else if (t === 'tiles') body = `<div class="tiles">${Array.from({ length: Math.min(c.tiles.length, 6) }, () => `<div class="sk sk-tile"></div>`).join('')}</div>`;
+  else if (t === 'rings') body = `<div class="rings">${c.rings.map(() => `<div class="ring"><div class="sk sk-circle"></div><div class="sk sk-line" style="width:70%"></div></div>`).join('')}</div>`;
+  else if (t === 'mix') body = `<div class="sk sk-mix"></div>${lines(Math.min(Math.max(c.rows.length, 3), 5))}`;
+  else if (t === 'table') body = lines(Math.min(Math.max(c.trs.length, 3), 6));
+  else body = `<div class="rank">${Array.from({ length: Math.min(Math.max((c.rows || []).length, 3), 6) }, (_, j) => `<div class="rrow"><div class="sk sk-line" style="width:${70 - j * 7}%"></div><div class="sk sk-track"></div></div>`).join('')}</div>`;
+  return `<section class="card t-${esc(t)} span-${esc(c.size)}${c.tone ? ' tone-' + esc(c.tone) : ''} anim" style="--i:${i}">
+    <div class="card-head"><div class="card-titles"><div class="card-title">${esc(c.title)}</div>${c.sub ? `<div class="card-sub">${esc(c.sub)}</div>` : ''}</div></div>
     ${body}
   </section>`;
 }
 
-function renderCard(c, mobile) {
-  let body = '';
-  if (c.empty) body = `<div class="empty">Sin datos en este rango</div>`;
-  else if (c.isBars) {
-    body = `<div class="chart">
-      <div class="tip"${mobile ? ' data-act="tipclear"' : ''} data-tip>${esc(c.tip)}</div>
-      <div class="plot" data-plot style="gap:${esc(c.gap)}">${c.bars.map((b, i) => `<div class="bar" data-bar="${i}"><div class="stack" style="height:${esc(b.h)}">${b.segs.map((s) => `<div style="flex:${+s.f};background:${esc(s.c)}"></div>`).join('')}</div></div>`).join('')}</div>
-      <div class="axis">${c.axis.map((x) => `<span>${esc(x)}</span>`).join('')}</div>
-      ${c.legend.length ? `<div class="legend">${c.legend.map((l) => `<div><span class="sw" style="background:${esc(l.c)}"></span><span>${esc(l.label)}</span></div>`).join('')}</div>` : ''}
+const hasDetail = (c) => c.type !== 'empty' && !!(c.detail || c.more > 0);
+
+function renderCard(c, mobile, i) {
+  const can = hasDetail(c);
+  const open = (inner, cls) => `<button class="${cls}" data-act="detail" data-id="${esc(c.id)}">${inner}</button>`;
+  return `<section class="card t-${esc(c.type)} span-${esc(c.size)}${c.tone ? ' tone-' + esc(c.tone) : ''} anim" style="--i:${i}" data-card="${esc(c.id)}">
+    <div class="card-head">
+      <div class="card-titles"><div class="card-title">${esc(c.title)}</div>${c.sub ? `<div class="card-sub">${esc(c.sub)}</div>` : ''}</div>
+      <div class="card-tools">${c.meta ? `<span class="card-meta">${esc(c.meta)}</span>` : ''}${can ? `<button class="icon-btn" data-act="detail" data-id="${esc(c.id)}" aria-label="Ver detalle de ${esc(c.title)}" title="Ver detalle">${svg('arrow', 16)}</button>` : ''}</div>
+    </div>
+    ${renderBig(c)}
+    ${renderBody(c, mobile, false)}
+    ${can && c.more > 0 ? open(`Ver ${c.more} más ${svg('arrow', 14)}`, 'more') : ''}
+  </section>`;
+}
+
+function renderBig(c) {
+  return c.big && c.type !== 'empty' ? `<div class="card-big"><span>${esc(c.big)}</span>${c.bigSub ? `<em>${esc(c.bigSub)}</em>` : ''}</div>` : '';
+}
+
+// Detalle: el gráfico en grande y, debajo, la tabla completa.
+function renderDetail(c, mobile, anim) {
+  const isTable = c.type === 'table';
+  const viz = isTable ? '' : `<div class="card dlg-viz t-${esc(c.type)}${c.tone ? ' tone-' + esc(c.tone) : ''}" data-card="${esc(c.id)}">${renderBig(c)}${renderBody(c, mobile, true)}</div>`;
+  const d = isTable ? c : c.detail;
+  const sec = d ? `<div class="dlg-sec">${isTable ? '' : `<div class="dlg-sec-title">${esc(c.dtitle)}</div>`}<div class="card dlg-table${isTable && c.tone ? ' tone-' + esc(c.tone) : ''}">${renderBody(d, mobile, true)}</div></div>` : '';
+  return `<div class="dlg-back${anim ? ' anim-in' : ''}" data-act="close"></div>
+    <div class="dlg${anim ? ' anim-in' : ''}" role="dialog" aria-modal="true" aria-label="${esc(c.title)}">
+      <div class="dlg-head">
+        <div class="card-titles"><div class="dlg-kicker">Detalle${c.meta ? ' · ' + esc(c.meta) : ''}</div><div class="dlg-title">${esc(c.title)}</div>${c.sub ? `<div class="card-sub">${esc(c.sub)}</div>` : ''}</div>
+        <button class="icon-btn" data-act="close" aria-label="Cerrar">${svg('close', 18)}</button>
+      </div>
+      <div class="dlg-body">${viz}${sec}</div>
     </div>`;
-  } else if (c.isRank) {
-    body = `<div class="rank">${c.rows.map((r) => `<div class="rrow">
-      <div class="rhead"><span class="rlabel">${esc(r.label)}</span><span class="rval"><span class="rnote">${esc(r.note)}</span><span class="rnum" style="color:${esc(r.tone)}">${esc(r.value)}</span></span></div>
-      <div class="track"><div style="width:${esc(r.w)};background:${esc(r.c)}"></div></div>
+}
+
+function renderLegend(c) {
+  if (!c.legend.length && !c.avgLabel) return '';
+  return `<div class="legend">${c.legend.map((l) => `<div><span class="sw${l.dash ? ' dash' : ''}" style="--c:${esc(l.c)}"></span><span>${esc(l.label)}</span></div>`).join('')}${c.avgLabel ? `<div><span class="sw avg"></span><span>${esc(c.avgLabel)}</span></div>` : ''}</div>`;
+}
+
+function renderBody(c, mobile, full) {
+  const t = c.type;
+  if (t === 'empty') return `<div class="empty">Sin datos en este rango</div>`;
+
+  if (t === 'bars') {
+    return `<div class="chart">
+      <div class="tip"${mobile ? ' data-act="tipclear"' : ''} data-tip>${esc(c.hint)}</div>
+      <div class="plot${full ? ' tall' : ''}" data-plot style="gap:${esc(c.gap)}">${c.bars.map((b, i) => `<div class="bar" data-bar="${i}"><div class="stack" style="height:${esc(b.h)};--d:${Math.min(i * 14, 700)}ms">${b.segs.map((s) => `<div style="flex:${+s.f};background:${esc(s.c)}"></div>`).join('')}</div></div>`).join('')}</div>
+      <div class="axis">${c.axis.map((x) => `<span>${esc(x)}</span>`).join('')}</div>
+      ${renderLegend(c)}
+    </div>`;
+  }
+
+  if (t === 'area') {
+    const gid = 'g-' + esc(c.id) + (full ? '-f' : '');
+    const c0 = esc(c.lines[0].c);
+    return `<div class="chart">
+      <div class="area${full ? ' tall' : ''}"><div class="area-in" data-area>
+        ${c.ticks.map((y) => `<div class="yt" style="top:${y.top}%"><span>${esc(y.label)}</span></div>`).join('')}
+        <svg class="area-svg" viewBox="0 0 1000 300" preserveAspectRatio="none" aria-hidden="true">
+          <defs><linearGradient id="${gid}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:${c0};stop-opacity:.3"></stop><stop offset="1" style="stop-color:${c0};stop-opacity:0"></stop></linearGradient></defs>
+          ${c.avgY != null ? `<line class="avg-line" x1="0" x2="1000" y1="${(c.avgY * 3).toFixed(1)}" y2="${(c.avgY * 3).toFixed(1)}" vector-effect="non-scaling-stroke"></line>` : ''}
+          <path d="${c.areaD}" fill="url(#${gid})"></path>
+          ${c.lines.map((l, j) => `<path d="${l.d}" fill="none" class="ln${l.dash ? ' dash' : ''}${j ? ' sub' : ''}" style="stroke:${esc(l.c)}" vector-effect="non-scaling-stroke"></path>`).join('')}
+        </svg>
+        <div class="hv"><i class="hv-line"></i>${c.lines.map((l) => `<i class="hv-dot" style="border-color:${esc(l.c)}"></i>`).join('')}<div class="hv-tip"><small></small><b></b></div></div>
+      </div></div>
+      <div class="axis area-axis">${c.axis.map((x) => `<span>${esc(x)}</span>`).join('')}</div>
+      ${renderLegend(c)}
+    </div>`;
+  }
+
+  if (t === 'rank') {
+    const rows = full ? c.allRows : c.rows;
+    return `<div class="rank">${rows.map((r, i) => `<div class="rrow">
+      <div class="rhead"><span class="rlabel">${esc(r.label)}</span><span class="rval">${r.note ? `<span class="rnote">${esc(r.note)}</span>` : ''}<span class="rnum" style="color:${esc(r.tone)}">${esc(r.value)}</span></span></div>
+      <div class="track"><div style="width:${+r.w}%;background:${esc(r.c)};--d:${Math.min(i * 60, 700)}ms"></div></div>
     </div>`).join('')}</div>`;
-  } else if (c.isTable && mobile) {
-    // En el teléfono cada fila se apila: título y campos con su etiqueta, sin scroll horizontal.
-    body = `<div class="mtable">${c.trs.map((tr) => `<div class="mtr">
-      <div class="mtr-title">${esc(tr.cells[0].v)}</div>
-      <div class="mtr-fields">${tr.cells.slice(1).map((td, j) => `<div><span>${esc(c.cols[j + 1].label)}</span><b style="color:${esc(td.color)};font-weight:${+td.fw || 400}">${esc(td.v)}</b></div>`).join('')}</div>
-    </div>`).join('')}</div>`;
-  } else if (c.isTable) {
-    body = `<div class="tscroll"><div class="table" style="min-width:${esc(c.minW)}">
-      <div class="tr th" style="grid-template-columns:${esc(c.grid)}">${c.cols.map((x) => `<div style="text-align:${esc(x.align)}">${esc(x.label)}</div>`).join('')}</div>
-      ${c.trs.map((tr) => `<div class="tr" style="grid-template-columns:${esc(tr.grid)}">${tr.cells.map((td) => `<div style="text-align:${esc(td.align)};color:${esc(td.color)};font-weight:${+td.fw || 400}">${esc(td.v)}</div>`).join('')}</div>`).join('')}
+  }
+
+  if (t === 'table') {
+    const trs = full ? c.allTrs : c.trs;
+    const heat = (x) => (x.heat != null ? `;background:color-mix(in srgb,var(--c-orange) ${Math.round(6 + x.heat * 38)}%,transparent)` : '');
+    const cbar = (x) => (x.bar != null ? `<i class="cbar"><i style="width:${Math.max(2, Math.round(x.bar * 100))}%"></i></i>` : '');
+    if (mobile) {
+      // En el teléfono cada fila se apila: título y campos con su etiqueta, sin scroll horizontal.
+      return `<div class="mtable">${trs.map((tr) => `<div class="mtr">
+        <div class="mtr-title">${esc(tr.cells[0].v)}</div>
+        <div class="mtr-fields">${tr.cells.slice(1).map((td, j) => `<div style="${heat(td).slice(1)}"><span>${esc(c.cols[j + 1].label)}</span><b style="color:${esc(td.color)};font-weight:${+td.fw || 500}">${esc(td.v)}</b>${cbar(td)}</div>`).join('')}</div>
+      </div>`).join('')}</div>`;
+    }
+    return `<div class="tscroll"><div class="table" style="min-width:${esc(c.minW)}">
+      <div class="tr th" style="grid-template-columns:${esc(c.grid)}">${c.cols.map((x) => `<div class="td" style="text-align:${esc(x.align)}">${esc(x.label)}</div>`).join('')}</div>
+      ${trs.map((tr) => `<div class="tr" style="grid-template-columns:${esc(tr.grid)}">${tr.cells.map((td) => `<div class="td" style="text-align:${esc(td.align)};color:${esc(td.color)};font-weight:${+td.fw || 400}${heat(td)}">${esc(td.v)}${cbar(td)}</div>`).join('')}</div>`).join('')}
     </div></div>`;
   }
-  return `<section class="card" data-card="${esc(c.id)}" style="grid-column:${esc(c.span)}">
-    <div class="card-head"><div class="card-titles"><div class="card-title">${esc(c.title)}</div><div class="card-sub">${esc(c.sub)}</div></div><div class="card-meta">${esc(c.meta)}</div></div>
-    ${body}
-  </section>`;
+
+  if (t === 'mix') {
+    const rows = full ? c.segs : c.rows;
+    return `<div class="mix-bar">${c.segs.map((s) => `<div style="flex:${+s.f} 1 0;background:${esc(s.c)}" title="${esc(s.label)} · ${esc(s.pct)}"></div>`).join('')}</div>
+      <div class="mix-rows">${rows.map((s) => `<div class="mix-row"><span class="mix-l"><span class="dot" style="background:${esc(s.c)}"></span><span>${esc(s.label)}</span></span><span class="mix-note">${esc(s.note)}</span><span class="mix-v">${esc(s.value)}</span><span class="mix-p">${esc(s.pct)}</span></div>`).join('')}</div>`;
+  }
+
+  if (t === 'gauge') {
+    return `<div class="gauge"><svg viewBox="0 0 250 250" aria-hidden="true"><circle cx="125" cy="125" r="104" class="g-track"></circle><circle cx="125" cy="125" r="104" class="g-val" pathLength="100" stroke-dasharray="${(+c.value).toFixed(1)} 100"></circle></svg>
+      <div class="g-in"><span class="g-num">${esc(c.label)}</span><span class="g-cap">${esc(c.caption)}</span></div></div>
+      <div class="g-rows">${c.rows.map((r) => `<div class="g-row"><span><span class="dot" style="background:${esc(r.c)}"></span>${esc(r.label)}</span><b>${esc(r.value)}</b></div>`).join('')}</div>`;
+  }
+
+  if (t === 'tiles') {
+    const ts = full ? c.allTiles : c.tiles;
+    const tag = full ? 'div' : 'button';
+    return `<div class="tiles">${ts.map((x, i) => `<${tag} class="tile tile-${esc(x.tone || 'dark')}"${full ? '' : ` data-act="detail" data-id="${esc(c.id)}"`} style="--d:${i * 60}ms">
+      <div class="tile-top"><span>${esc(x.kicker)}</span><span class="tile-ic">${svg('arrow', 14)}</span></div>
+      <div class="tile-title">${esc(x.title)}</div><div class="tile-sub">${esc(x.sub)}</div>
+      <div class="tile-foot"><b>${esc(x.value)}</b><small>${esc(x.foot)}</small></div>
+    </${tag}>`).join('')}</div>`;
+  }
+
+  if (t === 'rings') {
+    return `<div class="rings">${c.rings.map((r) => `<div class="ring"><div class="ring-c"><svg viewBox="0 0 80 80" aria-hidden="true"><circle cx="40" cy="40" r="32" class="r-track"></circle><circle cx="40" cy="40" r="32" class="r-val" pathLength="100" stroke-dasharray="${r.value.toFixed(1)} 100" style="stroke:${esc(r.c)}"></circle></svg><span>${esc(r.txt)}</span></div><div class="ring-l">${esc(r.label)}</div></div>`).join('')}</div>`;
+  }
+  return '';
 }
 
 new App(document.getElementById('app'));
