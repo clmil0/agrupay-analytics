@@ -1,7 +1,7 @@
 {
-  "name": "AgruPay Analítica",
-  "short_name": "AgruPay",
-  "description": "Analítica de uso de AgruPay.",
+  "name": "AlTanto Analytics",
+  "short_name": "AlTanto",
+  "description": "Analítica de uso de AlTanto.",
   "lang": "es",
   "start_url": "./",
   "scope": "./",

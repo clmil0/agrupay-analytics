@@ -30,7 +30,7 @@ button{appearance:none;-webkit-appearance:none;border:0;font:inherit;cursor:poin
 .shell{max-width:1440px;margin:0 auto;padding:26px clamp(20px,3vw,40px) 60px;box-sizing:border-box;display:flex;flex-direction:column;gap:22px;}
 .top{display:flex;align-items:center;justify-content:space-between;gap:20px;}
 .brand{display:flex;align-items:center;gap:12px;}
-.logo{width:42px;height:42px;border-radius:12px;background:var(--dark-card);color:#FFFFFF;display:grid;place-items:center;font-weight:500;font-size:22px;}
+.logo{width:42px;height:42px;border-radius:12px;display:block;box-shadow:0 8px 18px -10px rgba(35,72,230,.6);}
 .brand-name{font-size:23px;font-weight:600;letter-spacing:-.02em;display:flex;align-items:baseline;gap:8px;}
 .brand-name span{font-size:15px;font-weight:400;color:var(--text2);letter-spacing:0;}
 .top-right{display:flex;align-items:center;gap:10px;min-width:0;}
@@ -388,9 +388,7 @@ button.tile:hover{transform:translateY(-5px);box-shadow:0 22px 40px -20px rgba(2
 /* Inicio de sesión */
 .m-login{min-height:100vh;display:flex;flex-direction:column;padding:var(--st) 24px calc(var(--sb) + 16px);box-sizing:border-box;}
 .m-login-hero{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:20px;}
-.m-logo{width:96px;height:96px;border-radius:28px;background:#17171a;display:flex;align-items:flex-end;justify-content:center;gap:9px;padding-bottom:21px;box-sizing:border-box;box-shadow:0 20px 40px -18px rgba(23,23,26,.55);}
-.m-logo i{width:12px;border-radius:3px;background:#FFFFFF;}
-.m-logo i:nth-child(1){height:24px;}.m-logo i:nth-child(2){height:42px;background:#d6451b;}.m-logo i:nth-child(3){height:54px;}
+.m-logo{width:104px;height:104px;border-radius:24px;display:block;box-shadow:0 20px 40px -18px rgba(35,72,230,.55);}
 .m-login-titles{display:flex;flex-direction:column;align-items:center;gap:4px;}
 .m-login-name{font-size:34px;font-weight:600;letter-spacing:-.03em;}
 .m-login-sub{font-size:16px;color:var(--text2);}

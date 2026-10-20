@@ -310,14 +310,14 @@ class App {
     const S = this.state;
     const sec = SECTIONS.find((s) => s.id === S.section) || SECTIONS[0];
     const { loading, live, range, built, buildError, status, footer, enter } = this.view(sec);
-    document.title = sec.label + ' · AgruPay Analítica';
+    document.title = sec.label + ' · AlTanto Analytics';
     const nav = SECTIONS.map((s) => `<button class="${s.id === sec.id ? 'on' : ''}" data-act="go" data-id="${esc(s.id)}">${esc(s.label)}</button>`).join('');
     const who = live && S.email ? S.email.trim()[0].toUpperCase() : '';
 
     this.root.innerHTML = `
       <div class="shell${enter ? ' enter' : ''}">
         <header class="top anim" style="--i:0">
-          <div class="brand"><div class="logo">A</div><div class="brand-name">agrupay<span>analítica</span></div></div>
+          <div class="brand"><img class="logo" src="icons/icon-192.png" alt=""><div class="brand-name">AlTanto<span>Analytics</span></div></div>
           <div class="top-right">
             <div class="status-pill" title="${esc(status.text)}"><span class="dot" style="background:${status.dot}"></span><span class="status-text">${esc(status.text)}</span></div>
             ${S.mode === 'demo' && !this.forceDemo ? `<button class="pill primary" data-act="login">Entrar con Google</button>` : ''}
@@ -344,11 +344,11 @@ class App {
   renderMobile() {
     const S = this.state;
     if (S.mode === 'demo' && !this.forceDemo && !S.demoChosen) {
-      document.title = 'AgruPay Analítica';
+      document.title = 'AlTanto Analytics';
       this.root.innerHTML = `<div class="m-login">
         <div class="m-login-hero">
-          <div class="m-logo"><i></i><i></i><i></i></div>
-          <div class="m-login-titles"><div class="m-login-name">agrupay</div><div class="m-login-sub">Analítica de uso</div></div>
+          <img class="m-logo" src="icons/icon-512.png" alt="">
+          <div class="m-login-titles"><div class="m-login-name">AlTanto</div><div class="m-login-sub">Analytics</div></div>
         </div>
         <div class="m-login-actions">
           ${S.notice ? `<div class="notice">${esc(S.notice)}</div>` : ''}
@@ -366,7 +366,7 @@ class App {
     const short = loading ? 'Cargando' : live ? 'En vivo' : 'Ejemplo';
     const dot = (c) => `<span class="dot" style="background:${c}"></span>`;
     const chev = '<span class="m-chev"></span>';
-    document.title = (sec ? sec.label : 'Más') + ' · AgruPay Analítica';
+    document.title = (sec ? sec.label : 'Más') + ' · AlTanto Analytics';
 
     let body;
     if (sec) {
