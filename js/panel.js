@@ -10,6 +10,8 @@ const COL = { a: 'var(--c-orange)', ink: 'var(--c-ink)', blue: 'var(--c-blue)', 
 
 const SECTIONS = [
   { id: 'resumen', label: 'Resumen', desc: 'Usuarios activos, instalaciones nuevas y qué trae a la gente de vuelta.' },
+  { id: 'hipotesis', label: 'Hipótesis', desc: 'Cada hipótesis de la prueba contra su meta, persona por persona y día a día. Se mide al cierre del rango.' },
+  { id: 'testers', label: 'Testers', desc: 'Quién es tester y quién no, su perfil, su encuesta y cómo se mueve cada uno.' },
   { id: 'activacion', label: 'Activación y retención', desc: 'Onboarding por cohorte, hitos y retención D1 / D7 / D30.' },
   { id: 'uso', label: 'Uso', desc: 'Pantallas, toques, navegación y funciones.' },
   { id: 'correo', label: 'Motor de correo', desc: 'Lectores por banco, lecturas, latencia y cuentas conectadas.' },
@@ -41,7 +43,12 @@ const LBL = {
   ctrl: { 'movements.month': 'Mes', 'movements.accounts': 'Tus cuentas', 'movements.earlier': 'Meses anteriores', 'movements.penguin': 'Pingüino', 'movements.classify': 'Clasificar ›' },
   notif: { imported: 'Importados', payment_reminder: 'Recordatorio de pago', debt_reminder: 'Recordatorio de deuda', recurring: 'Recurrente', budget: 'Presupuesto', category_limit: 'Límite de categoría', other: 'Otro' },
   unlock: { ok: 'Correcto', cancelled: 'Cancelado', not_recognized: 'No reconocido', lockout: 'Bloqueado' },
-  channel: { testflight: 'TestFlight', appstore: 'App Store' },
+  channel: { testflight: 'TestFlight', appstore: 'App Store', development: 'Xcode' },
+  aud: { all: 'Todos', testers: 'Testers', others: 'No testers' },
+  gender: { f: 'Mujer', m: 'Hombre', otro: 'Otro' },
+  pay: { si: 'Sí pagaría', tal_vez: 'Tal vez', no: 'No pagaría' },
+  fatal: { muy: 'Muy decepcionado', algo: 'Algo decepcionado', nada: 'Nada decepcionado' },
+  by: { persona: 'User persona', gender: 'Género', age: 'Edad', iphone: 'iPhone' },
 };
 const lab = (d, k) => (k == null ? '—' : (LBL[d] && LBL[d][k]) || k);
 
@@ -60,7 +67,9 @@ const MS = (v) => (!ok(v) ? '—' : +v >= 1000 ? nf.format(Math.round(+v / 100) 
 const MIN = (v) => (ok(v) ? nf.format(+v) + ' min' : '—');
 const FH = (h) => (!ok(h) ? '—' : h < 1 ? Math.round(h * 60) + ' min' : h < 48 ? nf.format(Math.round(h * 10) / 10) + ' h' : nf.format(Math.round(h / 2.4) / 10) + ' d');
 const num = (v) => (ok(v) ? +v : 0);
-const inR = (rows, start, key) => (rows || []).filter((x) => String(x[key || 'day']).slice(0, 10) >= start);
+// Último día del rango elegido; lo fija build(). Con «Fechas» puede no ser hoy.
+let R_END = null;
+const inR = (rows, start, key) => (rows || []).filter((x) => { const d = String(x[key || 'day']).slice(0, 10); return d >= start && (!R_END || d <= R_END); });
 const group = (rows, kf, vf) => { const m = new Map(); (rows || []).forEach((x) => { const k = kf(x); m.set(k, (m.get(k) || 0) + num(vf(x))); }); return m; };
 const sum = (rows, f) => (rows || []).reduce((a, x) => a + num(typeof f === 'function' ? f(x) : x[f]), 0);
 const byDay = (rows) => { const m = new Map(); (rows || []).forEach((x) => m.set(String(x.day).slice(0, 10), x)); return m; };
@@ -198,6 +207,32 @@ function makeDemo() {
   [['movements.month', 420, 160, 1.8, 35, 0, null], ['movements.classify', 380, 150, null, 0, 120, null], ['movements.penguin', 140, 80, null, 0, 0, 62.5], ['movements.accounts', 110, 70, null, 0, 0, null], ['movements.earlier', 90, 50, null, 0, 0, null]].forEach(([control, taps, installs, avg_months_back, all_months, bursts, avg_pct_classified]) => push('analytics_movements_controls_30d', { control, taps, installs, avg_months_back, all_months, bursts, avg_pct_classified }));
   [['detected', 'monthly', 140, 22, 84, 9], ['detected', 'yearly', 18, 4, 79, 0], ['detected', 'weekly', 6, 5, 71, 0], ['suggested', 'monthly', 40, 38, 58, 6], ['suggested', 'weekly', 5, 9, 52, 0]].forEach(([level, cadence, confirmed, rejected, avg_score, as_installments]) => push('analytics_subscription_detection_30d', { level, cadence, confirmed, rejected, pct_confirmed: pct(confirmed, confirmed + rejected), avg_score, as_installments }));
   [['NETFLIX', 'suscripciones', 48, 2, 93], ['SPOTIFY', 'suscripciones', 41, 3, 91], ['SMART FIT', 'deporte', 22, 4, 82], ['MOVISTAR', 'servicios', 19, 6, 77], ['CLARO', 'servicios', 12, 5, 74], ['RAPPI', 'delivery', 3, 21, 48], ['UBER', 'transporte', 1, 14, 44], ['APPLE.COM/BILL', 'suscripciones', 27, 1, 88]].forEach(([merchant, category, confirmed, rejected, avg_score]) => push('analytics_subscription_merchants_30d', { merchant, category, confirmed, rejected, avg_score }));
+  // v22: 14 testers de TestFlight que empezaron hace 6 a 18 días y 30 instalaciones de App Store.
+  const DEV = ['iPhone15,2', 'iPhone14,5', 'iPhone16,1', 'iPhone13,2', 'iPhone17,3', 'iPhone14,7', 'iPhone12,1'];
+  const NAMES = ['Ana', 'Bruno', 'Carla', 'Diego', 'Elena', 'Fabio', 'Gaby', 'Hugo', 'Inés', 'Jorge', 'Kari', 'Luis', 'Mía', 'Nico'];
+  const PERS = ['Controlador', 'Despistado', 'Ahorrador'];
+  const hex = (n) => Array.from({ length: n }, () => '0123456789abcdef'[Math.floor(r() * 16)]).join('');
+  const pick = (xs) => xs[Math.floor(r() * xs.length)];
+  for (let k = 0; k < 44; k++) {
+    const tester = k < NAMES.length;
+    const id = hex(8) + '-' + hex(4) + '-4' + hex(3) + '-a' + hex(3) + '-' + hex(12);
+    const first = tester ? addD(today, -(6 + Math.round(k * 0.9))) : addD(today, -ri(1, 85));
+    const eng = tester ? 0.45 + r() * 0.5 : 0.15 + r() * 0.6;
+    const conn = r() < (tester ? 0.86 : 0.7);
+    const channel = tester ? 'testflight' : 'appstore';
+    let last = first;
+    for (let d = first, n = 1; d <= today; d = addD(d, 1), n++) {
+      if (n > 1 && r() > eng * (n <= 7 ? 0.95 : n <= 14 ? 0.75 : 0.55)) continue;
+      last = d;
+      const sessions = ri(1, 3), email = conn ? ri(0, 4) : 0, card = Math.round(email * 0.8), cardAuto = Math.round(card * (0.55 + r() * 0.35));
+      push('analytics_install_daily', { install_id: id, day: d, channel, app_version: '1.5.0', events: sessions * 20, sessions, opens: sessions + ri(0, 2), action_sessions: Math.max(0, sessions - (r() < 0.4 ? 1 : 0)), value_actions: r() < eng ? ri(1, 6) : 0, movements_created: ri(0, 1), classified: ri(0, 4), rules: r() < 0.1 ? 1 : 0, email_movements: email, card_movements: card, card_auto: cardAuto, card_corrected: cardAuto && r() < 0.25 ? 1 : 0, connected: n === 1 && conn ? 1 : 0, onboarding_finished: n === 1 && (conn || r() < 0.5) ? 1 : 0, goals_created: 0, goals_views: r() < 0.12 ? 1 : 0, invites: r() < 0.03 ? 1 : 0, assistant: r() < 0.05 ? 1 : 0, crashes: r() < 0.01 ? 1 : 0, errors: r() < 0.05 ? 1 : 0, minutes: Math.round((2 + r() * 8) * sessions * 10) / 10 });
+    }
+    push('analytics_install_profile', { install_id: id, first_day: first, last_day: last, first_version: '1.5.0', last_version: '1.5.0', channel, device: pick(DEV), os: 'iOS 18.6', preexisting: false, onboarding_step_order: conn ? 11 : 5, onboarding_last_step: conn ? 'finished' : 'connect_tapped' });
+    if (!tester) continue;
+    // Responde la encuesta final quien ya pasó su día 14.
+    const done = first <= addD(today, -13) && r() < 0.9, before = ri(30, 90);
+    push('analytics_testers', { install_id: id, alias: NAMES[k], is_tester: true, cohort: 'Prueba 1', test_start: first, age: ri(19, 48), gender: r() < 0.5 ? 'f' : 'm', iphone: null, persona: PERS[k % 3], notes: null, s_min_before: before, s_min_after: done ? Math.round(before * (0.25 + r() * 0.6)) : null, s_matches: done ? r() < 0.88 : null, s_tool_before: pick(['Excel', 'Cuaderno', 'App del banco', 'Nada']), s_tool_after: done ? pick(['AlTanto', 'AlTanto', 'AlTanto y Excel', 'Excel']) : null, s_replaced: done ? r() < 0.7 : null, s_pay: done ? pick(['si', 'tal_vez', 'no', 'no']) : null, s_pay_amount: done ? pick([0, 5, 10, 15]) : null, s_fatal: done ? pick(['muy', 'algo', 'algo', 'nada']) : null, s_recommended: done ? r() < 0.45 : null });
+  }
   return D;
 }
 
@@ -236,10 +271,18 @@ const FLAT = ['analytics_open_hours_30d', 'analytics_max_months_back_30d', 'anal
 // Las que agrega agrupay_analytics_v21_merchants.sql, para avisar si falta correrlo.
 const V21 = ['analytics_merchant_daily', 'analytics_classify_sheet_daily', 'analytics_classification_undo_daily', 'analytics_rules_backfill_daily', 'analytics_merchant_ranking_30d', 'analytics_merchant_reclassified_30d', 'analytics_merchant_auto_30d', 'analytics_merchant_unclassified_30d', 'analytics_movements_controls_30d', 'analytics_subscription_detection_30d', 'analytics_subscription_merchants_30d'];
 
-async function fetchView(view, filter, token) {
+// Las de sql/altanto_analytics_v22_testers.sql (en este repo). Se piden sin audiencia:
+// el panel separa testers del resto con analytics_testers.
+const V22 = ['analytics_install_daily', 'analytics_install_profile', 'analytics_testers'];
+
+// `aud` (testers / others) viaja en el encabezado x-audience, que v22 lee en
+// analytics_ev para que cada vista cuente sólo a esa audiencia.
+async function fetchView(view, filter, token, aud) {
   let out = [];
+  const headers = { apikey: SB_KEY, Authorization: 'Bearer ' + token };
+  if (aud && aud !== 'all') headers['x-audience'] = aud;
   for (let off = 0; off < 50000; off += 1000) {
-    const res = await fetch(SB_URL + '/rest/v1/' + view + '?select=*' + (filter ? '&' + filter : '') + '&limit=1000&offset=' + off, { headers: { apikey: SB_KEY, Authorization: 'Bearer ' + token } });
+    const res = await fetch(SB_URL + '/rest/v1/' + view + '?select=*' + (filter ? '&' + filter : '') + '&limit=1000&offset=' + off, { headers });
     if (res.status === 401) { const e = new Error('Sesión vencida'); e.code = 401; throw e; }
     if (!res.ok) throw new Error(view + ' respondió ' + res.status);
     const rows = await res.json();
@@ -247,6 +290,15 @@ async function fetchView(view, filter, token) {
     if (rows.length < 1000) break;
   }
   return out;
+}
+
+// Guarda filas de analytics_testers: crea las nuevas y, en las que ya existen,
+// cambia sólo las columnas que vienen (todas las filas con las mismas columnas).
+async function upsertTesters(rows, token) {
+  const res = await fetch(SB_URL + '/rest/v1/analytics_testers?on_conflict=install_id', { method: 'POST', headers: { apikey: SB_KEY, Authorization: 'Bearer ' + token, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=representation' }, body: JSON.stringify(rows) });
+  if (res.status === 401) { const e = new Error('Sesión vencida'); e.code = 401; throw e; }
+  if (!res.ok) throw new Error('analytics_testers respondió ' + res.status + (res.status === 404 ? ': corre sql/altanto_analytics_v22_testers.sql' : ''));
+  return res.json();
 }
 
 
@@ -296,7 +348,7 @@ function bars(ctx, o) {
   const dtitle = o.dtitle || (rev ? 'Día por día' : 'Detalle');
 
   if (o.area) {
-    const top = nice(Math.max(0, ...vals.flat()) * 1.12);
+    const top = o.top || nice(Math.max(0, ...vals.flat()) * 1.12);
     const X = (i) => (n > 1 ? (i / (n - 1)) * 1000 : 500);
     const Y = (v) => 300 - (v / top) * 300;
     const lines = o.series.map((s, j) => {
@@ -384,9 +436,201 @@ function rings(o) {
 
 const kpi = (label, value, sub, color) => ({ label, value, sub: sub || '', color: color || 'var(--text)' });
 
+// ── Personas (v22) ───────────────────────────────────────────────────────
+// Una por instalación: su perfil, su fila de analytics_testers (si la tiene) y
+// sus días. El día 1 de su prueba es `test_start` o, si no hay, su primer día.
+const IPHONE = { 'iPhone12,1': 'iPhone 11', 'iPhone12,3': 'iPhone 11 Pro', 'iPhone12,5': 'iPhone 11 Pro Max', 'iPhone12,8': 'iPhone SE (2.ª)', 'iPhone13,1': 'iPhone 12 mini', 'iPhone13,2': 'iPhone 12', 'iPhone13,3': 'iPhone 12 Pro', 'iPhone13,4': 'iPhone 12 Pro Max', 'iPhone14,4': 'iPhone 13 mini', 'iPhone14,5': 'iPhone 13', 'iPhone14,2': 'iPhone 13 Pro', 'iPhone14,3': 'iPhone 13 Pro Max', 'iPhone14,6': 'iPhone SE (3.ª)', 'iPhone14,7': 'iPhone 14', 'iPhone14,8': 'iPhone 14 Plus', 'iPhone15,2': 'iPhone 14 Pro', 'iPhone15,3': 'iPhone 14 Pro Max', 'iPhone15,4': 'iPhone 15', 'iPhone15,5': 'iPhone 15 Plus', 'iPhone16,1': 'iPhone 15 Pro', 'iPhone16,2': 'iPhone 15 Pro Max', 'iPhone17,1': 'iPhone 16 Pro', 'iPhone17,2': 'iPhone 16 Pro Max', 'iPhone17,3': 'iPhone 16', 'iPhone17,4': 'iPhone 16 Plus', 'iPhone17,5': 'iPhone 16e' };
+const devName = (d) => (d ? IPHONE[d] || d : '');
+const ageBand = (a) => (!ok(a) ? '' : a < 25 ? '18–24' : a < 35 ? '25–34' : a < 45 ? '35–44' : '45+');
+const sd = (v) => (v ? String(v).slice(0, 10) : null);
+
+function people(D) {
+  if (D._people) return D._people;
+  const tm = new Map((D.analytics_testers || []).map((t) => [t.install_id, t]));
+  const dm = new Map();
+  (D.analytics_install_daily || []).forEach((x) => { const m = dm.get(x.install_id) || dm.set(x.install_id, new Map()).get(x.install_id); m.set(sd(x.day), x); });
+  const seen = new Set();
+  const make = (x) => {
+    seen.add(x.install_id);
+    const t = tm.get(x.install_id) || {};
+    const days = dm.get(x.install_id) || new Map();
+    const ds = [...days.keys()].sort();
+    const first = sd(x.first_day) || ds[0] || null;
+    return { id: x.install_id, short: String(x.install_id).slice(0, 8), alias: t.alias || '', tester: !!t.is_tester, saved: !!t.install_id, s: t, cohort: t.cohort || '', start: sd(t.test_start) || first, first, last: ds[ds.length - 1] || sd(x.last_day), channel: x.channel || '', device: x.device || '', iphone: t.iphone || devName(x.device), persona: t.persona || '', gender: t.gender || '', age: t.age, step: x.onboarding_last_step || null, days };
+  };
+  const out = (D.analytics_install_profile || []).map(make);
+  // Marcados como testers pero sin perfil (todavía no mandan nada, o sólo del simulador).
+  tm.forEach((t, id) => { if (!seen.has(id)) out.push(make({ install_id: id })); });
+  return (D._people = out);
+}
+const pname = (p) => p.alias || p.short;
+const inAud = (p, aud, cohort) => (aud === 'testers' ? p.tester : aud === 'others' ? !p.tester : true) && (!cohort || p.cohort === cohort);
+const byKey = (by, p) => (by === 'gender' ? lab('gender', p.gender || null) : by === 'age' ? ageBand(p.age) : by === 'iphone' ? p.iphone : p.persona) || 'Sin dato';
+
+// Día n de la prueba de p, lo sumado de `k` entre sus días a y b (hasta `asOf`)
+// y si su día b ya terminó.
+const relD = (p, n) => addD(p.start, n - 1);
+const span = (p, a, b, k, asOf) => { let s = 0; for (let n = a; n <= b; n++) { const d = relD(p, n); if (d > asOf) break; s += num((p.days.get(d) || {})[k]); } return s; };
+const ever = (p, k, asOf) => { let s = 0; p.days.forEach((x, d) => { if (d <= asOf) s += num(x[k]); }); return s; };
+const ripe = (p, b, asOf) => { const d = relD(p, b); return d <= asOf && d < limaToday(); };
+const dayOf = (p, asOf) => Math.round((new Date(asOf + 'T00:00:00Z') - new Date(p.start + 'T00:00:00Z')) / 864e5) + 1;
+const yes = (v) => (v == null || v === '' ? null : v === true || v === 'true');
+// Logrado antes del día b: cumple ya; si no, sólo se decide al terminar ese día.
+const byDay14 = (got, p, b, asOf, val) => ({ v: got ? true : ripe(p, b, asOf) ? false : null, pending: !got && !ripe(p, b, asOf), val });
+
+// Las hipótesis de la prueba. `ev` dice, para una persona y una fecha de corte,
+// si la cumple (true / false), si aún no se puede saber (v: null + pending) o
+// si no hay dato (v: null). `below`: la meta es quedar por debajo.
+// `trend`: se dibuja su avance día a día.
+const HYP = [
+  { id: 'h8', code: 'H8', name: 'Los gastos cuadran', claim: 'Al menos 9 de 10 confirman que los gastos de la app cuadran con los que registran hoy.', metric: '% que confirma que cuadran', target: 90, src: 'Encuesta final',
+    ev: (p) => { const v = yes(p.s.s_matches); return { v, val: v == null ? 'Sin respuesta' : v ? 'Cuadran' : 'No cuadran' }; } },
+  { id: 'h0', code: 'H0', name: 'Problema real', claim: 'Al menos 6 de 10 registran o revisan sus gastos 3 o más veces en dos semanas.', metric: '% con 3 o más sesiones con acción entre el día 1 y el 14', target: 60, src: 'App', trend: true,
+    ev: (p, a) => { const s = span(p, 1, 14, 'action_sessions', a); return byDay14(s >= 3, p, 14, a, N(s) + (s === 1 ? ' sesión' : ' sesiones')); } },
+  { id: 'h1', code: 'H1', name: 'Ahorro de tiempo', claim: 'Al menos 6 de 10 reducen 50 % o más el tiempo que pasan revisando sus gastos.', metric: '% que reduce su tiempo de revisión 50 % o más', target: 60, src: 'Encuesta inicial y día 14',
+    ev: (p) => { const b = p.s.s_min_before, f = p.s.s_min_after; if (!ok(b) || !ok(f) || +b <= 0) return { v: null, val: ok(b) ? N0(b) + ' min al empezar · falta el día 14' : 'Sin respuesta' }; const red = ((b - f) / b) * 100; return { v: red >= 50, val: N0(b) + ' → ' + N0(f) + ' min (' + (red >= 0 ? '−' : '+') + N0(Math.abs(red)) + ' %)' }; } },
+  { id: 'h2', code: 'H2', name: 'Onboarding', claim: 'Al menos 8 de 10 completan el onboarding con el correo conectado.', metric: '% que conectó su correo', target: 80, src: 'App', trend: true,
+    ev: (p, a) => { const c = ever(p, 'connected', a) > 0; return byDay14(c, p, 1, a, c ? 'Conectó' : p.step ? 'Llegó a «' + lab('step', p.step) + '»' : 'No conectó'); } },
+  { id: 'h3', code: 'H3', name: 'Hábito', claim: 'Al menos 6 de 10 hacen otra revisión útil en la segunda semana, sin que se lo pidan.', metric: '% con al menos una acción de valor entre el día 8 y el 14 (abrir no cuenta)', target: 60, src: 'App', trend: true,
+    ev: (p, a) => { const s = span(p, 8, 14, 'value_actions', a); return byDay14(s >= 1, p, 14, a, N(s) + ' acciones en la semana 2'); } },
+  { id: 'h4', code: 'H4', name: 'Disposición a pagar', claim: 'Al menos 3 de 10 están interesados en pagar por las funciones Premium.', metric: '% que respondió que sí pagaría', target: 30, src: 'Entrevista después del día 14',
+    ev: (p) => { const v = p.s.s_pay; return { v: v ? v === 'si' : null, val: v ? lab('pay', v) + (ok(p.s.s_pay_amount) && +p.s.s_pay_amount > 0 ? ' · S/ ' + N(p.s.s_pay_amount) + ' al mes' : '') : 'Sin respuesta' }; } },
+  { id: 'h5', code: 'H5', name: 'Resultados, no novedad', claim: 'Reemplazan su herramienta y en la semana 2 usan la app al menos 80 % de lo que la usaron en la semana 1.', metric: '% que reemplazó su herramienta y mantuvo su uso', target: 60, src: 'Encuesta y app',
+    ev: (p, a) => {
+      const w1 = span(p, 1, 7, 'action_sessions', a), w2 = span(p, 8, 14, 'action_sessions', a);
+      const keep = w1 ? w2 >= 0.8 * w1 : w2 > 0;
+      const rep = yes(p.s.s_replaced);
+      const val = (rep == null ? 'Sin respuesta' : rep ? 'Reemplazó' : 'No reemplazó') + (p.s.s_tool_before ? ' (' + p.s.s_tool_before + (p.s.s_tool_after ? ' → ' + p.s.s_tool_after : '') + ')' : '') + ' · semana 2: ' + N(w2) + ' de ' + N(w1);
+      if (!ripe(p, 14, a)) return { v: null, pending: true, val };
+      return { v: rep == null ? null : rep && keep, val };
+    } },
+  { id: 'h6', code: 'H6', name: 'Market fit', claim: 'Al menos 3 de 10 se sentirían muy decepcionados si la app dejara de existir.', metric: '% que respondió «muy decepcionado»', target: 30, src: 'Encuesta final',
+    ev: (p) => { const v = p.s.s_fatal; return { v: v ? v === 'muy' : null, val: v ? lab('fatal', v) : 'Sin respuesta' }; } },
+  { id: 'h7', code: 'H7', name: 'Recomendación', claim: 'Al menos 3 de 10 invitan o hablan de la app con otras personas.', metric: '% que recomendó la app o mandó una invitación', target: 30, src: 'Entrevista y app',
+    ev: (p, a) => { const inv = ever(p, 'invites', a), r = yes(p.s.s_recommended); const v = inv > 0 || r === true ? true : r === false ? false : null; return { v, val: (r == null ? 'Sin respuesta' : r ? 'La recomendó' : 'No la recomendó') + (inv ? ' · ' + N(inv) + ' invitaciones' : '') }; } },
+  { id: 'h9', code: 'H9', name: 'Creación de metas', claim: 'Al menos 5 de 10 crean una meta en sus primeros 7 días.', metric: '% que creó una meta entre el día 1 y el 7', target: 50, src: 'App', trend: true,
+    ev: (p, a, ctx) => { const s = span(p, 1, 7, ctx.goalKey, a); return byDay14(s >= 1, p, 7, a, ctx.goalKey === 'goals_created' ? N(s) + ' metas' : N(s) + ' visitas a Metas'); } },
+  { id: 'h10', code: 'H10', name: 'Categorización automática', claim: 'Al menos 80 % de los consumos con tarjeta quedan bien categorizados sin que el usuario los edite.', metric: '% de lo que clasificó el motor que el usuario reclasificó después', target: 20, below: true, ratio: true, src: 'App · consumos con tarjeta',
+    ev: (p, a) => { const au = span(p, 1, 14, 'card_auto', a), co = span(p, 1, 14, 'card_corrected', a); return { a: au, c: co, v: au ? (co / au) * 100 < 20 : null, val: au ? P(r1((co / au) * 100)) + ' (' + N(co) + ' de ' + N(au) + ')' : 'Sin consumos con tarjeta' }; } },
+];
+
+// El resultado de una hipótesis en un grupo de personas.
+function score(h, pop, asOf, ctx) {
+  const rows = pop.map((p) => Object.assign({ p }, h.ev(p, asOf, ctx)));
+  const dec = rows.filter((x) => x.v != null);
+  const pend = rows.filter((x) => x.v == null && x.pending).length;
+  const hit = dec.filter((x) => x.v).length;
+  let value, n;
+  if (h.ratio) { const a = sum(rows, 'a'); value = a ? (sum(rows, 'c') / a) * 100 : null; n = rows.filter((x) => x.a > 0).length; }
+  else { n = dec.length; value = n ? (hit / n) * 100 : null; }
+  const pass = value == null ? null : h.below ? value < h.target : value >= h.target;
+  return { rows, value, n, hit, pend, pass };
+}
+const ST = { pass: ['Cumple', 'var(--pos)'], fail: ['No cumple', 'var(--neg)'], pend: ['En curso', 'var(--c-blue)'], none: ['Sin datos', 'var(--text3)'] };
+const stOf = (s) => (s.value == null ? (s.pend ? ST.pend : ST.none) : s.pass ? ST.pass : ST.fail);
+
+function hypCard(h, pop, asOf, ctx) {
+  const s = score(h, pop, asOf, ctx);
+  const [status, statusC] = stOf(s);
+  const groups = new Map();
+  pop.forEach((p) => { const k = byKey(ctx.by, p); (groups.get(k) || groups.set(k, []).get(k)).push(p); });
+  const g = [...groups.entries()].map(([k, ps]) => {
+    const x = score(h, ps, asOf, ctx);
+    return { label: k, n: x.n, value: x.value == null ? '—' : P(r1(x.value)), note: !x.n ? (x.pend ? 'en curso' : 'sin datos') : h.ratio ? N(x.n) + ' con tarjeta' : N(x.hit) + ' de ' + N(x.n), c: stOf(x)[1] };
+  }).sort((a, b) => b.n - a.n);
+  const order = (x) => (x.v === false ? 0 : x.pending ? 1 : x.v === true ? 2 : 3);
+  const rows = s.rows.slice().sort((a, b) => order(a) - order(b) || pname(a.p).localeCompare(pname(b.p)));
+  const nLabel = h.ratio ? (s.n ? N(s.n) + ' personas con consumos' : '') : s.n ? N(s.hit) + ' de ' + N(s.n) + ' personas' : '';
+  return Object.assign(base({ id: 'hyp-' + h.id, title: h.code + ' · ' + h.name, sub: h.claim, meta: h.src, size: 'sm', dtitle: 'Persona por persona',
+    detail: table({ id: 'hyp-' + h.id + '-d', show: Infinity, minW: '620px',
+      cols: [{ label: 'Persona', align: 'left', w: 'minmax(110px,1.2fr)' }, { label: lab('by', ctx.by), align: 'left', w: 'minmax(90px,1fr)' }, { label: 'Día', w: 'minmax(48px,.5fr)' }, { label: 'Dato', align: 'left', w: 'minmax(170px,2.2fr)' }, { label: 'Resultado', align: 'left', w: 'minmax(90px,1fr)' }],
+      rows: rows.map((x) => { const d = dayOf(x.p, asOf); const st = x.v === true ? ST.pass : x.v === false ? ST.fail : x.pending ? ST.pend : ST.none; return [{ v: pname(x.p), fw: 500 }, { v: byKey(ctx.by, x.p) }, d >= 1 ? 'D' + d : '—', { v: x.val }, { v: st[0], color: st[1], fw: 600 }]; }) }) }),
+  { type: pop.length ? 'hyp' : 'empty', metric: h.metric, value: s.value, label: s.value == null ? '—' : P(r1(s.value)), target: h.target, targetLabel: (h.below ? 'Meta: menos de ' : 'Meta: ') + h.target + ' %', status: status + (s.value != null && s.pend ? ' · ' + s.pend + ' en curso' : ''), statusC, nLabel, groups: g, rows: g });
+}
+
+// Lista de instalaciones para marcar testers. La búsqueda y la edición viven en app.js.
+function roster(o, all) {
+  const list = all.slice().sort((a, b) => (b.tester - a.tester) || String(b.last || '').localeCompare(String(a.last || '')));
+  return Object.assign(base(o), { type: 'roster', people: list.map((p) => ({ id: p.id, short: p.short, alias: p.alias, tester: p.tester, persona: p.persona, iphone: p.iphone, channel: lab('channel', p.channel || null), first: p.first, last: p.last, days: p.days.size, cohort: p.cohort, step: p.step })), rows: [] });
+}
+
 function build(id, ctx) {
   const D = ctx.D, st = ctx.start, days = ctx.days, R = ctx.range, T = ctx.today;
   const perDay = (rows, f) => { const m = group(rows, (x) => String(x.day).slice(0, 10), f); return (d) => m.get(d) || 0; };
+  R_END = ctx.end || null;
+  const surveyed = (p) => ['s_matches', 's_min_after', 's_replaced', 's_pay', 's_fatal', 's_recommended'].some((k) => p.s[k] != null && p.s[k] !== '');
+
+  if (id === 'hipotesis') {
+    // Se mide al cierre del rango. Sólo cuenta quien empezó dentro de los 90 días cargados.
+    const asOf = ctx.end, lo = addD(T, -89);
+    const pop = people(D).filter((p) => inAud(p, ctx.aud, ctx.cohort) && p.start && p.start <= asOf && p.start >= lo);
+    const hctx = Object.assign({}, ctx, { goalKey: (D.analytics_install_daily || []).some((x) => num(x.goals_created) > 0) ? 'goals_created' : 'goals_views' });
+    const sc = HYP.map((h) => score(h, pop, asOf, hctx));
+    const judged = sc.filter((s) => s.value != null);
+    const passN = judged.filter((s) => s.pass).length;
+    const inTest = pop.filter((p) => { const d = dayOf(p, asOf); return d >= 1 && d <= 14; }).length;
+    const doneN = pop.filter((p) => ripe(p, 14, asOf)).length;
+    const trend = HYP.filter((h) => h.trend);
+    const TC = [COL.a, COL.blue, COL.green, COL.gold];
+    // El avance empieza el día en que empezó la primera persona.
+    const first = pop.reduce((a, p) => (!a || p.start < a ? p.start : a), null);
+    const tdays = first ? days.filter((d) => d >= first) : [];
+    const series = trend.map((h, i) => {
+      const m = new Map(tdays.map((d) => { const ps = pop.filter((p) => p.start <= d); return [d, ps.length ? (ps.filter((p) => h.ev(p, d, hctx).v === true).length / ps.length) * 100 : 0]; }));
+      return { label: h.code + ' · ' + h.name, c: TC[i % TC.length], get: (d) => m.get(d) };
+    });
+    const D14 = Array.from({ length: 14 }, (_, i) => i + 1);
+    const goalNote = hctx.goalKey === 'goals_views' ? ' H9 usa las visitas a Metas mientras la app no mande «goal_created».' : '';
+    return {
+      kpis: [
+        kpi('Hipótesis que se cumplen', judged.length ? passN + ' de ' + judged.length : '—', judged.length < HYP.length ? (HYP.length - judged.length) + ' sin resultado todavía' : 'todas medidas', judged.length && passN < judged.length ? 'var(--warn)' : null),
+        kpi('Personas medidas', N(pop.length), lab('aud', ctx.aud) + (ctx.cohort ? ' · ' + ctx.cohort : '') + ' · al ' + fd(asOf)),
+        kpi('En sus 14 días', N(inTest), 'todavía en la prueba'),
+        kpi('Terminaron los 14 días', N(doneN), pop.length ? P(r1((doneN / pop.length) * 100)) + ' de las personas' : '—'),
+        kpi('Encuestas respondidas', N(pop.filter(surveyed).length), 'de ' + N(pop.length)),
+      ],
+      cards: HYP.map((h) => hypCard(h, pop, asOf, hctx)).concat([
+        // Con su propio ctx.days, para que el detalle ponga lo más reciente arriba.
+        bars(Object.assign({}, ctx, { days: tdays }), { id: 'h-trend', wide: true, area: true, top: 100, title: 'Cómo avanzan día a día', sub: 'De las personas que ya habían empezado, cuántas lo lograron hasta ese día. Metas: H0 60 %, H2 80 %, H3 60 %, H9 50 %.' + goalNote, keys: tdays, fmt: (v) => P(r1(v)), tipFn: (d, v) => fd(d) + ' · ' + trend.map((h, i) => h.code + ' ' + P(r1(v[i]))).join(' · '), series }),
+        table({ id: 'h-days', wide: true, show: 12, minW: '860px', title: 'Sesiones con acción por día de la prueba', sub: 'Una fila por persona; D1 es su primer día. Más intenso, más sesiones; «·» es un día sin ninguna y el vacío, un día que aún no llega.',
+          cols: [{ label: 'Persona', align: 'left', w: 'minmax(110px,1.6fr)' }].concat(D14.map((n) => ({ label: 'D' + n, heat: true, align: 'center', w: 'minmax(34px,.5fr)' }))).concat([{ label: 'Total', bar: true, w: 'minmax(56px,.8fr)' }]),
+          rows: pop.slice().sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0)).map((p) => [{ v: pname(p), fw: 500 }].concat(D14.map((n) => { const d = relD(p, n); if (d > asOf) return { v: '' }; const v = num((p.days.get(d) || {}).action_sessions); return v ? { v: N(v), n: v } : { v: '·', color: 'var(--text3)' }; })).concat([nc(span(p, 1, 14, 'action_sessions', asOf))])) }),
+      ]),
+    };
+  }
+
+  if (id === 'testers') {
+    const all = people(D);
+    const pop = all.filter((p) => inAud(p, ctx.aud, ctx.cohort));
+    const Ts = all.filter((p) => p.tester), Os = all.filter((p) => !p.tester);
+    const actIn = (p, a, b) => { let n = 0; p.days.forEach((x, d) => { if (d >= a && d <= b && num(x.events) > 0) n++; }); return n; };
+    const act7 = (ps) => ps.filter((p) => actIn(p, addD(ctx.end, -6), ctx.end) > 0).length;
+    const perAct = (ps) => { const m = new Map(); ps.forEach((p) => p.days.forEach((x, d) => { if (num(x.events) > 0) m.set(d, (m.get(d) || 0) + 1); })); return (d) => m.get(d) || 0; };
+    const inRng = (p, k) => { let s = 0; p.days.forEach((x, d) => { if (d >= st && d <= ctx.end) s += num(x[k]); }); return s; };
+    const noProfile = Ts.filter((p) => !p.persona || !ok(p.age) || !p.gender).length;
+    const act = pop.filter((p) => p.tester || actIn(p, st, ctx.end) > 0).map((p) => ({ p, ad: actIn(p, st, ctx.end), ses: inRng(p, 'sessions') })).sort((a, b) => b.p.tester - a.p.tester || b.ses - a.ses);
+    const cnt = (f) => items(group(Ts, f, () => 1));
+    return {
+      kpis: [
+        kpi('Testers marcados', N(Ts.length), 'de ' + N(all.length) + ' instalaciones'),
+        kpi('Testers activos', N(act7(Ts)), '7 días al ' + fd(ctx.end)),
+        kpi('No testers activos', N(act7(Os)), '7 días al ' + fd(ctx.end)),
+        kpi('Testers sin perfil', N(noProfile), 'falta persona, edad o género', noProfile ? 'var(--warn)' : null),
+        kpi('Encuestas respondidas', N(Ts.filter(surveyed).length), 'de ' + N(Ts.length) + ' testers'),
+      ],
+      cards: [
+        roster({ id: 'roster', wide: true, title: 'Instalaciones', sub: 'Marca quién es tester y toca Editar para su perfil y su encuesta. Cada tester ve el inicio de su ID en Configuración › Ayuda › «Enviar estadísticas ahora».' }, all),
+        bars(ctx, { id: 't-active', size: 'lg', area: true, title: 'Activos por día', sub: 'Personas con al menos un evento: testers contra el resto.', keys: days, tipFn: (d, v) => fd(d) + ' · ' + N(v[0]) + ' testers · ' + N(v[1]) + ' no testers', series: [{ label: 'Testers', c: COL.a, get: perAct(Ts) }, { label: 'No testers', c: COL.blue, get: perAct(Os) }] }),
+        mix({ id: 't-persona', size: 'sm', title: 'Testers por user persona', bigSub: 'testers', items: cnt((p) => p.persona || 'Sin persona') }),
+        table({ id: 't-activity', wide: true, show: 10, minW: '980px', title: 'Actividad por persona', sub: lab('aud', ctx.aud) + ' del ' + fd(st) + ' al ' + fd(ctx.end) + '. «Con acción»: sesiones en las que registró o revisó algo. «De valor»: clasificar, reglas, metas, asistente…',
+          cols: [{ label: 'Persona', align: 'left', w: 'minmax(110px,1.4fr)' }, { label: 'Tester', align: 'left', w: 'minmax(52px,.6fr)' }, { label: 'User persona', align: 'left', w: 'minmax(96px,1.1fr)' }, { label: 'iPhone', align: 'left', w: 'minmax(100px,1.1fr)' }, { label: 'Días activos', bar: true }, { label: 'Sesiones' }, { label: 'Con acción', heat: true }, { label: 'De valor' }, { label: 'Gastos del correo' }, { label: 'Minutos' }, { label: 'Errores' }, { label: 'Último día', w: 'minmax(70px,.8fr)' }],
+          rows: act.map(({ p, ad, ses }) => [{ v: pname(p), fw: 500 }, p.tester ? 'Sí' : 'No', p.persona || '—', p.iphone || '—', nc(ad), N(ses), nc(inRng(p, 'action_sessions')), N(inRng(p, 'value_actions')), N(inRng(p, 'email_movements')), N(r1(inRng(p, 'minutes'))), { v: N(inRng(p, 'errors')), color: inRng(p, 'errors') ? 'var(--warn)' : 'var(--text)' }, fd(p.last)]) }),
+        mix({ id: 't-age', size: 'sm', title: 'Testers por edad', bigSub: 'testers', items: cnt((p) => ageBand(p.age) || 'Sin edad') }),
+        mix({ id: 't-gender', size: 'sm', title: 'Testers por género', bigSub: 'testers', items: cnt((p) => lab('gender', p.gender || null).replace('—', 'Sin dato')) }),
+        mix({ id: 't-iphone', size: 'sm', title: 'Testers por iPhone', bigSub: 'testers', items: cnt((p) => p.iphone || 'Sin dato') }),
+      ],
+    };
+  }
 
   if (id === 'resumen') {
     const da = inR(D.analytics_daily_active, st); const dam = byDay(da);

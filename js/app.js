@@ -33,8 +33,8 @@ const kIcon = (l) =>
   : /regla|clasific|sugerenc|pendiente/i.test(l) ? 'tag'
   : /comercio|pagos/i.test(l) ? 'store'
   : /versi/i.test(l) ? 'layers'
-  : /retenci|onboarding|conversi|precisi|confirm|respond|puntaje|cuotas/i.test(l) ? 'target'
-  : /dau|wau|mau|activos|persona|sesion|visita/i.test(l) ? 'users'
+  : /retenci|onboarding|conversi|precisi|confirm|respond|puntaje|cuotas|hipótesis|14 días/i.test(l) ? 'target'
+  : /dau|wau|mau|activos|persona|sesion|visita|tester/i.test(l) ? 'users'
   : 'chart';
 
 class App {
@@ -45,14 +45,17 @@ class App {
     const q = new URLSearchParams(location.search);
     this.forceDemo = q.has('demo');
     this.captureHash();
-    this.state = { section: ui.section || 'resumen', range: ui.range || 30, wide: window.innerWidth >= 900, mode: !this.forceDemo && this.session() ? 'loading' : 'demo', data: null, email: null, notice: this.hashNotice || null, updatedAt: null, demoChosen: !!ui.demo };
+    this.state = { section: SECTIONS.some((s) => s.id === ui.section) || ui.section === 'mas' ? ui.section : 'resumen', range: ui.range || 30, from: ui.from || null, to: ui.to || null, aud: ui.aud || 'all', by: ui.by || 'persona', cohort: ui.cohort || '', wide: window.innerWidth >= 900, mode: !this.forceDemo && this.session() ? 'loading' : 'demo', data: null, email: null, notice: this.hashNotice || null, updatedAt: null, demoChosen: !!ui.demo };
     this.cards = new Map();
     this.sheet = false;
     this.detail = null;
+    this.editing = null;
     this.animKey = null;
     window.addEventListener('resize', () => { const w = window.innerWidth >= 900; if (w !== this.state.wide) this.setState({ wide: w }); });
     window.addEventListener('scroll', () => this.onScroll(), { passive: true });
-    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && this.detail) this.openDetail(null); });
+    document.addEventListener('keydown', (e) => { if (e.key !== 'Escape') return; if (this.editing) this.editTester(null); else if (this.detail) this.openDetail(null); });
+    root.addEventListener('change', (e) => this.onChange(e));
+    root.addEventListener('input', (e) => { if (e.target.matches('[data-q]')) { rosterQ = e.target.value; this.paintRoster(); } });
     root.addEventListener('click', (e) => this.onClick(e));
     root.addEventListener('mouseover', (e) => this.onHover(e));
     root.addEventListener('mousemove', (e) => this.onMove(e));
@@ -66,7 +69,18 @@ class App {
   }
 
   setState(p) { Object.assign(this.state, p); this.render(); }
-  saveUI(p) { try { localStorage.setItem(LS_UI, JSON.stringify({ section: this.state.section, range: this.state.range, demo: this.state.demoChosen, ...p })); } catch (e) {} }
+  saveUI(p) { const S = this.state; try { localStorage.setItem(LS_UI, JSON.stringify({ section: S.section, range: S.range, from: S.from, to: S.to, aud: S.aud, by: S.by, cohort: S.cohort, demo: S.demoChosen, ...p })); } catch (e) {} }
+  // Los datos que se dibujan: los de Supabase o, sin sesión, los de ejemplo.
+  data() { const S = this.state; return S.mode === 'live' && S.data ? S.data : this._demo || (this._demo = makeDemo()); }
+  // Primer y último día del rango. Con «Fechas», dentro de los 90 días cargados.
+  span() {
+    const S = this.state, today = limaToday(), lo = addD(today, -89);
+    if (S.range !== 'custom') return { from: addD(today, -(+S.range - 1)), to: today };
+    const c = (d, f) => (d && /^\d{4}-\d\d-\d\d$/.test(d) ? (d < lo ? lo : d > today ? today : d) : f);
+    let to = c(S.to, today), from = c(S.from, addD(to, -13));
+    if (from > to) [from, to] = [to, from];
+    return { from, to };
+  }
 
   captureHash() {
     const h = new URLSearchParams(location.hash.slice(1));
@@ -100,25 +114,33 @@ class App {
       const tk = await this.token();
       if (!tk) throw Object.assign(new Error('Sesión vencida'), { code: 401 });
       const today = limaToday();
+      const aud = this.state.aud;
+      // [vista, filtro, audiencia]: las de personas (v22) van sin audiencia.
       const jobs = [];
-      DAILY.forEach((v) => jobs.push([v, 'day=gte.' + addD(today, -89) + '&order=day.asc']));
-      jobs.push(['analytics_weekly_active', 'week=gte.' + monday(addD(today, -7 * 12))]);
-      jobs.push(['analytics_monthly_active', 'month=gte.' + addD(today, -100)]);
-      jobs.push(['analytics_onboarding_funnel', 'cohort_week=gte.' + monday(addD(today, -7 * 16))]);
-      jobs.push(['analytics_retention_cohorts', 'cohort_week=gte.' + monday(addD(today, -7 * 16))]);
-      FLAT.forEach((v) => jobs.push([v, '']));
+      DAILY.forEach((v) => jobs.push([v, 'day=gte.' + addD(today, -89) + '&order=day.asc', aud]));
+      jobs.push(['analytics_weekly_active', 'week=gte.' + monday(addD(today, -7 * 12)), aud]);
+      jobs.push(['analytics_monthly_active', 'month=gte.' + addD(today, -100), aud]);
+      jobs.push(['analytics_onboarding_funnel', 'cohort_week=gte.' + monday(addD(today, -7 * 16)), aud]);
+      jobs.push(['analytics_retention_cohorts', 'cohort_week=gte.' + monday(addD(today, -7 * 16)), aud]);
+      FLAT.forEach((v) => jobs.push([v, '', aud]));
+      jobs.push(['analytics_install_daily', 'day=gte.' + addD(today, -89) + '&order=day.asc']);
+      jobs.push(['analytics_install_profile', '']);
+      jobs.push(['analytics_testers', '']);
       const userP = fetch(SB_URL + '/auth/v1/user', { headers: { apikey: SB_KEY, Authorization: 'Bearer ' + tk } }).then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
       const failed = [];
-      const res = await Promise.all(jobs.map(([v, f]) => fetchView(v, f, tk).catch((e) => { if (e.code === 401) throw e; failed.push(v); return []; })));
+      const res = await Promise.all(jobs.map(([v, f, a]) => fetchView(v, f, tk, a).catch((e) => { if (e.code === 401) throw e; failed.push(v); return []; })));
       const data = {};
       jobs.forEach(([v], i) => (data[v] = res[i]));
       const user = await userP;
-      const empty = Object.values(data).every((r) => !r.length);
-      let notice = null;
+      const empty = jobs.every(([v], i) => V22.includes(v) || !res[i].length);
       if (failed.length === jobs.length) throw new Error('ninguna vista respondió. ¿Ya corriste agrupay_analytics_v16.sql?');
-      if (failed.length && failed.every((v) => V21.includes(v))) notice = 'Faltan las vistas de comercios, hoja de clasificar y suscripciones (' + failed.length + '). Corre agrupay_analytics_v21_merchants.sql en este proyecto y toca Actualizar.';
-      else if (failed.length) notice = 'No se pudieron leer ' + failed.length + ' vistas: ' + failed.slice(0, 4).join(', ') + (failed.length > 4 ? '…' : '');
-      else if (empty) notice = await this.diagnose(tk, user);
+      const miss21 = failed.filter((v) => V21.includes(v)), miss22 = failed.filter((v) => V22.includes(v)), other = failed.filter((v) => !V21.includes(v) && !V22.includes(v));
+      const parts = [];
+      if (other.length) parts.push('No se pudieron leer ' + other.length + ' vistas: ' + other.slice(0, 4).join(', ') + (other.length > 4 ? '…' : '') + '.');
+      if (miss21.length) parts.push('Faltan las vistas de comercios, hoja de clasificar y suscripciones (' + miss21.length + '). Corre agrupay_analytics_v21_merchants.sql en este proyecto y toca Actualizar.');
+      if (miss22.length) parts.push('Faltan las vistas de testers e hipótesis: corre sql/altanto_analytics_v22_testers.sql (está en este repo) y toca Actualizar.' + (aud !== 'all' ? ' Sin ella, el filtro Testers / No testers no separa nada.' : ''));
+      let notice = parts.join(' ') || null;
+      if (!notice && empty) notice = aud !== 'all' ? 'Ninguna vista trae datos para «' + lab('aud', aud) + '». ¿Ya marcaste a los testers en la sección Testers?' : await this.diagnose(tk, user);
       this.setState({ mode: 'live', data, email: user.email || 'sesión iniciada', notice, updatedAt: new Date() });
     } catch (e) {
       if (e.code === 401) localStorage.removeItem(LS_SESSION);
@@ -173,7 +195,17 @@ class App {
       if (id === this.tab()) { if (id === 'mas' && this.state.section !== 'mas') this.go('mas'); else window.scrollTo({ top: 0, behavior: 'smooth' }); }
       else this.go(id);
     }
-    else if (a === 'range') { const n = +el.dataset.n; this.setState({ range: n }); this.saveUI({ range: n }); }
+    else if (a === 'range') { const n = el.dataset.n === 'custom' ? 'custom' : +el.dataset.n; const p = { range: n }; if (n === 'custom' && !this.state.from) Object.assign(p, this.span(), { range: 'custom' }); this.setState(p); this.saveUI(); }
+    else if (a === 'aud') { if (el.dataset.n === this.state.aud) return; this.setState({ aud: el.dataset.n }); this.saveUI(); if (this.state.mode !== 'demo') this.load(); }
+    else if (a === 'by') { this.setState({ by: el.dataset.n }); this.saveUI(); }
+    else if (a === 't-toggle') { const p = people(this.data()).find((x) => x.id === el.dataset.id); if (p) this.saveTesters([{ install_id: p.id, is_tester: !p.tester }]); }
+    else if (a === 'mark-tf') {
+      const rows = people(this.data()).filter((p) => p.channel === 'testflight' && !p.tester).map((p) => ({ install_id: p.id, is_tester: true }));
+      if (rows.length && window.confirm('¿Marcar como testers las ' + rows.length + ' instalaciones de TestFlight que faltan?')) this.saveTesters(rows);
+    }
+    else if (a === 't-edit') this.editTester(el.dataset.id);
+    else if (a === 't-close') this.editTester(null);
+    else if (a === 't-save') { const f = this.root.querySelector('[data-form]'); if (f && f.reportValidity()) this.saveTesters([this.collectTester(f)]).then((ok) => { if (ok) this.editTester(null); }); }
     else if (a === 'detail') this.openDetail(el.dataset.id);
     else if (a === 'close') this.openDetail(null);
     else if (a === 'login') this.login();
@@ -183,7 +215,48 @@ class App {
     else if (a === 'sheet') this.setSheet(el.dataset.open === '1');
     else if (a === 'tipclear') this.clearTip(el.closest('[data-card]'));
   }
+  onChange(e) {
+    const k = e.target.dataset.ch;
+    if (k === 'from' || k === 'to') { this.setState({ [k]: e.target.value || null, range: 'custom' }); this.saveUI(); }
+    else if (k === 'cohort') { this.setState({ cohort: e.target.value }); this.saveUI(); }
+  }
   go(id) { this.detail = null; window.scrollTo(0, 0); this.setState({ section: id }); this.saveUI({ section: id }); }
+
+  // ── Testers ────────────────────────────────────────────────────────────
+  editTester(id) { this.editing = id; this.paintDetail(true); }
+  // La lista de instalaciones se rehace sola al buscar, sin perder el foco del buscador.
+  paintRoster() {
+    const host = this.root.querySelector('[data-rlist]');
+    const c = this.cards.get('roster');
+    if (host && c) host.innerHTML = rosterList(c);
+  }
+  collectTester(form) {
+    const f = new FormData(form);
+    const txt = (k) => { const v = String(f.get(k) == null ? '' : f.get(k)).trim(); return v || null; };
+    const nm = (k) => { const v = txt(k); return v == null || isNaN(+v) ? null : +v; };
+    const row = { install_id: this.editing, alias: txt('alias') || '', is_tester: f.get('is_tester') === 'on', test_start: txt('test_start'), age: nm('age') == null ? null : Math.round(nm('age')) };
+    ['cohort', 'gender', 'iphone', 'persona', 'notes', 's_tool_before', 's_tool_after', 's_pay', 's_fatal'].forEach((k) => (row[k] = txt(k)));
+    ['s_min_before', 's_min_after', 's_pay_amount'].forEach((k) => (row[k] = nm(k)));
+    ['s_matches', 's_replaced', 's_recommended'].forEach((k) => { const v = txt(k); row[k] = v == null ? null : v === 'true'; });
+    row.updated_at = new Date().toISOString();
+    return row;
+  }
+  // Guarda en analytics_testers (o, con los datos de ejemplo, sólo en memoria).
+  async saveTesters(rows) {
+    const S = this.state;
+    if (!rows.length || S.mode === 'loading') return false;
+    const D = this.data();
+    let saved = rows;
+    if (S.mode === 'live') {
+      try { saved = await upsertTesters(rows, await this.token()); }
+      catch (e) { this.setState({ notice: 'No se guardó: ' + e.message }); return false; }
+    }
+    const list = D.analytics_testers || (D.analytics_testers = []);
+    saved.forEach((r) => { const t = list.find((x) => x.install_id === r.install_id); if (t) Object.assign(t, r); else list.push(Object.assign({ alias: '', is_tester: true }, r)); });
+    delete D._people;
+    this.setState({ notice: S.mode !== 'live' ? 'Con los datos de ejemplo los cambios no se guardan: se pierden al recargar.' : S.aud !== 'all' ? 'Guardado. Toca Actualizar para que las demás secciones cuenten a esta persona en su audiencia.' : null });
+    return true;
+  }
   // Pestaña activa en móvil: las cuatro principales o «Más» para el resto.
   tab() { const id = this.state.section; return MAIN_TABS.includes(id) ? id : 'mas'; }
   // La hoja de cuenta se abre y cierra sin volver a dibujar, para que se anime.
@@ -195,6 +268,18 @@ class App {
   openDetail(id) { this.detail = id; this.paintDetail(true); }
   paintDetail(anim) {
     const host = this.root.querySelector('[data-dlg]');
+    if (this.editing && host) {
+      const D = this.data(), all = people(D);
+      const p = all.find((x) => x.id === this.editing);
+      if (p) {
+        document.documentElement.classList.add('noscroll');
+        const opts = (k) => [...new Set(all.map((x) => x[k]).filter(Boolean))].sort();
+        host.innerHTML = renderEditor(p, { cohort: opts('cohort'), persona: opts('persona') }, anim);
+        if (anim) { const i = host.querySelector('input[name="alias"]'); if (i) i.focus({ preventScroll: true }); }
+        return;
+      }
+      this.editing = null;
+    }
     const c = this.detail ? this.cards.get(this.detail) : null;
     if (!c) this.detail = null;
     document.documentElement.classList.toggle('noscroll', !!c);
@@ -279,24 +364,45 @@ class App {
     const live = S.mode === 'live';
     // Cargando: se arma la sección con los datos de ejemplo sólo para saber la
     // forma de cada tarjeta (barras, ranking o tabla); ningún valor se muestra.
-    const data = live && S.data ? S.data : this._demo || (this._demo = makeDemo());
+    const data = this.data();
     const today = limaToday();
     const range = S.range;
+    const { from, to } = this.span();
     const days = [];
-    for (let i = range - 1; i >= 0; i--) days.push(addD(today, -i));
-    const ctx = { D: data, today, start: days[0], days, range, wide: S.wide };
+    for (let d = from; d <= to; d = addD(d, 1)) days.push(d);
+    const ctx = { D: data, today, start: from, end: to, days, range: days.length, wide: S.wide, aud: S.aud, by: S.by, cohort: S.cohort };
     let built;
     let buildError = null;
     try { built = build(sec.id, ctx); } catch (e) { console.error(e); buildError = e; built = { kpis: [], cards: [] }; }
     this.cards = new Map(built.cards.map((c) => [c.id, c]));
     const t = S.updatedAt ? S.updatedAt.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }) : '';
     const status = loading ? { dot: 'var(--c-blue)', text: 'Cargando…' } : live ? { dot: 'var(--pos)', text: S.email + (t ? ' · ' + t : '') } : { dot: 'var(--c-orange)', text: 'Datos de ejemplo' };
-    const footer = (live || loading ? 'En vivo desde las vistas analytics_* de Supabase.' : 'Datos de ejemplo con la misma forma que las vistas analytics_*. Entra con una cuenta de analytics_admins para ver los reales.') + ' Hora de Lima; excluye el canal debug.';
-    // Las animaciones de entrada sólo corren al cambiar de sección, rango o datos.
-    const key = [sec.id, range, S.mode, S.wide].join('|');
+    const footer = (live || loading ? 'En vivo desde las vistas analytics_* de Supabase.' : 'Datos de ejemplo con la misma forma que las vistas analytics_*. Entra con una cuenta de analytics_admins para ver los reales.') + ' Audiencia: ' + lab('aud', S.aud) + '. Hora de Lima; excluye el canal debug.';
+    // Con los datos de ejemplo sólo las secciones por persona cambian con la audiencia.
+    const audNote = !live && !loading && S.aud !== 'all' && !PEOPLE_SECTIONS.includes(sec.id) ? 'Con los datos de ejemplo, el filtro Testers / No testers sólo cambia Hipótesis y Testers. Con datos reales filtra todas las secciones.' : null;
+    // Las animaciones de entrada sólo corren al cambiar de sección, rango, audiencia o datos.
+    const key = [sec.id, from, to, S.aud, S.mode, S.wide].join('|');
     const enter = key !== this.animKey;
     this.animKey = key;
-    return { loading, live, range, built, buildError, status, footer, enter };
+    return { loading, live, range, built, buildError, status, footer, enter, audNote };
+  }
+
+  // Audiencia, rango (con «Fechas») y, en las secciones por persona, desglose y grupo.
+  controls(sec, mobile) {
+    const S = this.state, today = limaToday();
+    const seg = (act, opts, cur) => `<div class="${mobile ? 'm-seg' : 'seg'}"${mobile ? ` style="grid-template-columns:repeat(${opts.length},1fr)"` : ''}>${opts.map(([v, l]) => `<button class="${String(v) === String(cur) ? 'on' : ''}" data-act="${act}" data-n="${esc(v)}">${esc(l)}</button>`).join('')}</div>`;
+    const out = [seg('aud', Object.entries(LBL.aud), S.aud)];
+    if (!sec.fixed) {
+      out.push(seg('range', mobile ? [[1, 'Hoy'], [7, '7 d'], [30, '30 d'], [90, '90 d'], ['custom', 'Fechas']] : [[1, 'Hoy'], [7, '7 días'], [30, '30 días'], [90, '90 días'], ['custom', 'Fechas']], S.range));
+      if (S.range === 'custom') {
+        const { from, to } = this.span(), lo = addD(today, -89);
+        out.push(`<div class="dates"><label><span>Desde</span><input type="date" data-ch="from" value="${esc(from)}" min="${lo}" max="${today}"></label><label><span>Hasta</span><input type="date" data-ch="to" value="${esc(to)}" min="${lo}" max="${today}"></label></div>`);
+      }
+    }
+    if (sec.id === 'hipotesis') out.push(seg('by', Object.entries(LBL.by), S.by));
+    const cohorts = [...new Set((this.data().analytics_testers || []).map((t) => t.cohort).filter(Boolean))].sort();
+    if (PEOPLE_SECTIONS.includes(sec.id) && cohorts.length) out.push(`<select class="sel" data-ch="cohort" aria-label="Grupo de prueba"><option value="">Todos los grupos</option>${cohorts.map((c) => `<option${c === S.cohort ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select>`);
+    return out.join('');
   }
 
   render() {
@@ -309,7 +415,7 @@ class App {
   renderDesktop() {
     const S = this.state;
     const sec = SECTIONS.find((s) => s.id === S.section) || SECTIONS[0];
-    const { loading, live, range, built, buildError, status, footer, enter } = this.view(sec);
+    const { loading, live, built, buildError, status, footer, enter, audNote } = this.view(sec);
     document.title = sec.label + ' · AlTanto Analytics';
     const nav = SECTIONS.map((s) => `<button class="${s.id === sec.id ? 'on' : ''}" data-act="go" data-id="${esc(s.id)}">${esc(s.label)}</button>`).join('');
     const who = live && S.email ? S.email.trim()[0].toUpperCase() : '';
@@ -328,9 +434,10 @@ class App {
         <nav class="tabs anim" style="--i:1">${nav}</nav>
         <section class="hero anim" style="--i:2">
           <div class="hero-text"><h1>${esc(sec.label)}</h1><div class="desc">${esc(sec.desc)}</div></div>
-          ${!sec.fixed ? `<div class="seg">${[7, 30, 90].map((n) => `<button class="${n === range ? 'on' : ''}" data-act="range" data-n="${n}">${n} días</button>`).join('')}</div>` : ''}
+          <div class="hero-ctl">${this.controls(sec, false)}</div>
         </section>
         ${S.notice ? `<div class="notice">${esc(S.notice)}</div>` : ''}
+        ${audNote ? `<div class="notice">${esc(audNote)}</div>` : ''}
         ${buildError ? `<div class="notice">No se pudo armar esta sección: ${esc(buildError.message)}</div>` : ''}
         <section class="kpis"${loading ? ' aria-busy="true"' : ''}>${built.kpis.map((k, i) => (loading ? renderKpiSkeleton(k, i + 3) : renderKpi(k, i + 3))).join('')}</section>
         <section class="grid"${loading ? ' aria-busy="true"' : ''}>${built.cards.map((c, i) => (loading ? renderCardSkeleton(c, i + 6) : renderCard(c, false, i + 6))).join('')}</section>
@@ -362,7 +469,7 @@ class App {
 
     const sec = SECTIONS.find((s) => s.id === S.section) || null;
     const tab = this.tab();
-    const { loading, live, range, built, buildError, status, footer, enter } = this.view(sec || SECTIONS[0]);
+    const { loading, live, built, buildError, status, footer, enter, audNote } = this.view(sec || SECTIONS[0]);
     const short = loading ? 'Cargando' : live ? 'En vivo' : 'Ejemplo';
     const dot = (c) => `<span class="dot" style="background:${c}"></span>`;
     const chev = '<span class="m-chev"></span>';
@@ -371,8 +478,9 @@ class App {
     let body;
     if (sec) {
       body = `<div class="m-head anim" style="--i:0"><h1>${esc(sec.label)}</h1><div class="desc">${esc(sec.desc)}</div></div>
-        ${!sec.fixed ? `<div class="m-pad anim" style="--i:1"><div class="m-seg">${[7, 30, 90].map((n) => `<button class="${n === range ? 'on' : ''}" data-act="range" data-n="${n}">${n} días</button>`).join('')}</div></div>` : ''}
+        <div class="m-pad m-ctl anim" style="--i:1">${this.controls(sec, true)}</div>
         ${S.notice ? `<div class="m-pad"><div class="notice">${esc(S.notice)}</div></div>` : ''}
+        ${audNote ? `<div class="m-pad"><div class="notice">${esc(audNote)}</div></div>` : ''}
         ${buildError ? `<div class="m-pad"><div class="notice">No se pudo armar esta sección: ${esc(buildError.message)}</div></div>` : ''}
         <div class="kpis m-pad"${loading ? ' aria-busy="true"' : ''}>${built.kpis.map((k, i) => (loading ? renderKpiSkeleton(k, i + 2) : renderKpi(k, i + 2))).join('')}</div>
         <div class="grid m-pad"${loading ? ' aria-busy="true"' : ''}>${built.cards.map((c, i) => (loading ? renderCardSkeleton(c, i + 4) : renderCard(c, true, i + 4))).join('')}</div>
@@ -392,9 +500,9 @@ class App {
 
     const tabs = [
       ['resumen', 'Resumen', '<span class="ic-bars"><i></i><i></i><i></i></span>'],
-      ['activacion', 'Activación', '<span class="ic-target"><i></i></span>'],
-      ['uso', 'Uso', '<span class="ic-grid"><i></i><i></i><i></i><i></i></span>'],
-      ['correo', 'Correo', '<span class="ic-mail"><i></i></span>'],
+      ['hipotesis', 'Hipótesis', '<span class="ic-target"><i></i></span>'],
+      ['testers', 'Testers', '<span class="ic-users"><i></i><i></i></span>'],
+      ['activacion', 'Activación', '<span class="ic-grid"><i></i><i></i><i></i><i></i></span>'],
       ['mas', 'Más', '<span class="ic-dots"><i></i><i></i><i></i></span>'],
     ];
 
@@ -420,7 +528,10 @@ class App {
   }
 }
 
-const MAIN_TABS = ['resumen', 'activacion', 'uso', 'correo'];
+const MAIN_TABS = ['resumen', 'hipotesis', 'testers', 'activacion'];
+// Las que se arman persona por persona (v22): cambian con la audiencia también con los datos de ejemplo.
+const PEOPLE_SECTIONS = ['hipotesis', 'testers'];
+let rosterQ = '';
 
 function renderKpi(k, i) {
   return `<div class="kpi anim" style="--i:${i}"><div class="kpi-ic">${svg(kIcon(k.label), 19)}</div><div class="kpi-tx"><div class="kpi-value" style="color:${esc(k.color)}">${esc(k.value)}</div><div class="kpi-label">${esc(k.label)}</div>${k.sub ? `<div class="kpi-sub">${esc(k.sub)}</div>` : ''}</div></div>`;
@@ -572,7 +683,90 @@ function renderBody(c, mobile, full) {
   if (t === 'rings') {
     return `<div class="rings">${c.rings.map((r) => `<div class="ring"><div class="ring-c"><svg viewBox="0 0 80 80" aria-hidden="true"><circle cx="40" cy="40" r="32" class="r-track"></circle><circle cx="40" cy="40" r="32" class="r-val" pathLength="100" stroke-dasharray="${r.value.toFixed(1)} 100" style="stroke:${esc(r.c)}"></circle></svg><span>${esc(r.txt)}</span></div><div class="ring-l">${esc(r.label)}</div></div>`).join('')}</div>`;
   }
+
+  // Hipótesis: el valor contra la meta (la rayita), su estado y el desglose.
+  if (t === 'hyp') {
+    const w = c.value == null ? 0 : Math.max(1, Math.min(100, c.value));
+    const gs = full ? c.groups : c.groups.slice(0, 4);
+    return `<div class="hyp">
+      <div class="hyp-top"><span class="hyp-val">${esc(c.label)}</span><span class="hyp-chip" style="--c:${esc(c.statusC)}">${esc(c.status)}</span></div>
+      <div class="hyp-metric">${esc(c.metric)}</div>
+      <div class="hyp-bar"><i style="width:${w}%;background:${esc(c.statusC)}"></i><b style="left:${Math.min(100, +c.target)}%"></b></div>
+      <div class="hyp-foot"><span>${esc(c.targetLabel)}</span><span>${esc(c.nLabel)}</span></div>
+      ${gs.length ? `<div class="hyp-groups">${gs.map((g) => `<div class="hyp-g"><span class="hyp-gl">${esc(g.label)}</span><span class="hyp-gn">${esc(g.note)}</span><b style="color:${esc(g.c)}">${esc(g.value)}</b></div>`).join('')}${!full && c.groups.length > gs.length ? `<div class="hyp-gn">y ${c.groups.length - gs.length} grupos más en el detalle</div>` : ''}</div>` : ''}
+    </div>`;
+  }
+
+  if (t === 'roster') {
+    const tf = c.people.filter((p) => p.channel === 'TestFlight' && !p.tester).length;
+    return `<div class="roster">
+      <div class="roster-tools"><input class="roster-q" type="search" data-q value="${esc(rosterQ)}" placeholder="Busca por el inicio del ID, alias o persona" aria-label="Buscar instalación">${tf ? `<button class="pill ghost" data-act="mark-tf">Marcar ${tf} de TestFlight</button>` : ''}</div>
+      <div data-rlist>${rosterList(c)}</div>
+    </div>`;
+  }
   return '';
+}
+
+// Las filas de la lista de instalaciones que coinciden con la búsqueda.
+function rosterList(c) {
+  const q = rosterQ.trim().toLowerCase();
+  const hit = c.people.filter((p) => !q || [p.id, p.alias, p.persona, p.cohort, p.iphone].some((v) => String(v || '').toLowerCase().includes(q)));
+  const max = 200;
+  if (!c.people.length) return `<div class="empty">Todavía no hay instalaciones. Corre sql/altanto_analytics_v22_testers.sql y toca Actualizar.</div>`;
+  if (!hit.length) return `<div class="empty">Ninguna instalación coincide con «${esc(rosterQ)}»</div>`;
+  return `<div class="rr-list">${hit.slice(0, max).map((p) => `<div class="rr${p.tester ? ' on' : ''}">
+      <button class="chk${p.tester ? ' on' : ''}" data-act="t-toggle" data-id="${esc(p.id)}" role="switch" aria-checked="${p.tester}" aria-label="Tester ${esc(p.short)}"><i></i></button>
+      <div class="rr-main"><div class="rr-title"><code>${esc(p.short)}</code>${p.alias ? `<b>${esc(p.alias)}</b>` : `<span class="rr-muted">${p.tester ? 'Sin alias' : 'No tester'}</span>`}</div><div class="rr-sub">${esc([p.persona, p.iphone, p.channel, p.cohort].filter(Boolean).join(' · ') || '—')}</div></div>
+      <div class="rr-days">${esc(fd(p.first))} → ${esc(fd(p.last))}<small>${esc(N(p.days))} días con datos</small></div>
+      <button class="pill ghost small" data-act="t-edit" data-id="${esc(p.id)}">Editar</button>
+    </div>`).join('')}</div>${hit.length > max ? `<div class="rr-more">Mostrando ${max} de ${hit.length}. Busca por el inicio del ID para encontrar a alguien.</div>` : ''}`;
+}
+
+// Perfil y encuesta de una instalación, en la misma hoja del detalle.
+function renderEditor(p, opts, anim) {
+  const s = p.s || {};
+  const v = (k) => esc(s[k] == null ? '' : k === 'test_start' ? String(s[k]).slice(0, 10) : s[k]);
+  const fld = (label, html, cls) => `<label class="fld${cls ? ' ' + cls : ''}"><span>${esc(label)}</span>${html}</label>`;
+  const inp = (k, type, extra) => `<input name="${k}" type="${type || 'text'}" value="${v(k)}"${extra || ''}>`;
+  const sel = (k, list) => `<select name="${k}"><option value="">—</option>${list.map(([o, l]) => `<option value="${esc(o)}"${s[k] != null && String(s[k]) === String(o) ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+  const yn = (k) => sel(k, [['true', 'Sí'], ['false', 'No']]);
+  const dl = (id, xs) => `<datalist id="${id}">${xs.map((x) => `<option value="${esc(x)}"></option>`).join('')}</datalist>`;
+  return `<div class="dlg-back${anim ? ' anim-in' : ''}" data-act="t-close"></div>
+    <div class="dlg dlg-form${anim ? ' anim-in' : ''}" role="dialog" aria-modal="true" aria-label="Editar tester">
+      <div class="dlg-head">
+        <div class="card-titles"><div class="dlg-kicker">Instalación ${esc(p.short)}${p.iphone ? ' · ' + esc(p.iphone) : ''}${p.channel ? ' · ' + esc(lab('channel', p.channel)) : ''}</div><div class="dlg-title">${esc(p.alias || 'Sin alias')}</div><div class="card-sub">Primer día ${esc(fd(p.first))} · último ${esc(fd(p.last))} · ${esc(N(p.days.size))} días con datos</div></div>
+        <button class="icon-btn" data-act="t-close" aria-label="Cerrar">${svg('close', 18)}</button>
+      </div>
+      <form class="dlg-body" data-form onsubmit="return false">
+        <div class="fsec">Perfil</div>
+        <div class="fgrid">
+          ${fld('Alias', inp('alias', 'text', ' maxlength="40" placeholder="Un alias, no el nombre completo"'))}
+          <label class="fld fchk"><input type="checkbox" name="is_tester"${p.tester || !p.saved ? ' checked' : ''}><span>Es tester</span></label>
+          ${fld('Grupo de prueba', inp('cohort', 'text', ' list="dl-cohort" maxlength="40" placeholder="Prueba 1"'))}
+          ${fld('Día 1 de su prueba', inp('test_start', 'date'), '')}
+          ${fld('Edad', inp('age', 'number', ' min="10" max="100" step="1" inputmode="numeric"'))}
+          ${fld('Género', sel('gender', Object.entries(LBL.gender)))}
+          ${fld('iPhone', inp('iphone', 'text', ' maxlength="40" placeholder="' + esc(devName(p.device) || 'Modelo') + '"'))}
+          ${fld('User persona', inp('persona', 'text', ' list="dl-persona" maxlength="40"'))}
+          ${fld('Notas', `<textarea name="notes" rows="2" maxlength="500">${v('notes')}</textarea>`, 'wide')}
+        </div>
+        <div class="fsec">Encuesta y entrevista</div>
+        <div class="fgrid">
+          ${fld('H1 · Minutos por semana revisando gastos, al empezar', inp('s_min_before', 'number', ' min="0" step="1" inputmode="numeric"'))}
+          ${fld('H1 · Lo mismo, el día 14', inp('s_min_after', 'number', ' min="0" step="1" inputmode="numeric"'))}
+          ${fld('H8 · ¿Los gastos cuadran con sus registros?', yn('s_matches'))}
+          ${fld('H5 · ¿Reemplazó su herramienta?', yn('s_replaced'))}
+          ${fld('H5 · Qué usaba antes', inp('s_tool_before', 'text', ' maxlength="60" placeholder="Excel, cuaderno, app del banco…"'))}
+          ${fld('H5 · Qué usa ahora', inp('s_tool_after', 'text', ' maxlength="60"'))}
+          ${fld('H4 · ¿Pagaría por Premium?', sel('s_pay', Object.entries(LBL.pay)))}
+          ${fld('H4 · Cuánto al mes (S/)', inp('s_pay_amount', 'number', ' min="0" step="0.5" inputmode="decimal"'))}
+          ${fld('H6 · Si la app dejara de existir…', sel('s_fatal', Object.entries(LBL.fatal)))}
+          ${fld('H7 · ¿Habló de la app o la recomendó?', yn('s_recommended'))}
+        </div>
+        ${dl('dl-cohort', opts.cohort)}${dl('dl-persona', opts.persona)}
+        <div class="factions"><button type="button" class="pill" data-act="t-close">Cancelar</button><button type="button" class="pill primary" data-act="t-save">Guardar</button></div>
+      </form>
+    </div>`;
 }
 
 new App(document.getElementById('app'));
