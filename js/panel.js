@@ -16,7 +16,7 @@ const SECTIONS = [
   { id: 'uso', label: 'Uso', desc: 'Pantallas, toques, navegación y funciones.' },
   { id: 'correo', label: 'Motor de correo', desc: 'Lectores por banco, lecturas, latencia y cuentas conectadas.' },
   { id: 'clasificacion', label: 'Clasificación', desc: 'Automático contra manual, precisión de cada motor, sugerencias y Pendientes.' },
-  { id: 'comercios', label: 'Comercios', desc: 'Qué comercios se clasifican solos, cuáles se corrigen y cuáles llegan sin categoría.' },
+  { id: 'comercios', label: 'Comercios', desc: 'Compras con tarjeta: cuáles se clasifican solas, cuáles se corrigen y cuáles llegan sin categoría. Aparte, Yape, Plin y transferencias.' },
   { id: 'suscripciones', label: 'Suscripciones', desc: 'Cuánto acierta el detector de suscripciones en los últimos 30 días.', fixed: true },
   { id: 'pro', label: 'Pro y paywall', desc: 'Qué función vende y cuánto se usa lo Pro.' },
   { id: 'calidad', label: 'Calidad', desc: 'Arranque, crashes, cuelgues, errores y Face ID.' },
@@ -789,7 +789,7 @@ function build(id, ctx) {
     const bf = inR(D.analytics_rules_backfill_daily, st); const bfm = byDay(bf);
     return {
       kpis: [
-        kpi('Clasificado automático', autoT + man ? P(Math.round((autoT / (autoT + man)) * 1000) / 10) : '—', 'contra lo sacado a mano de Pendientes'),
+        kpi('Clasificado automático', autoT + man ? P(Math.round((autoT / (autoT + man)) * 1000) / 10) : '—', 'contra lo sacado a mano de Pendientes · incluye Yape y Plin'),
         kpi('Clasificados a mano', N(sum(cl, 'movements')), N(sum(cl, 'reclassified')) + ' reclasificados'),
         kpi('Reglas creadas', N(sum(rules, 'rules')), 'en ' + R + ' días'),
         kpi('Pendientes del mes', N(pbLast && pbLast.p50_pending_month), pbLast ? 'mediana · ' + fd(pbLast.day) : '—'),
@@ -814,31 +814,45 @@ function build(id, ctx) {
   }
 
   if (id === 'comercios') {
-    const md = inR(D.analytics_merchant_daily, st);
-    const bySrc = (s) => md.filter((x) => x.source === s);
-    const auto = sum(bySrc('auto'), 'movements'), arr = sum(bySrc('arrived'), 'movements'), man = sum(bySrc('manual'), 'movements');
-    const rec = sum(bySrc('reclassified'), 'movements'), corr = sum(bySrc('reclassified').filter((x) => x.engine), 'movements');
+    // Dos mundos distintos: las compras con tarjeta (un comercio que el motor
+    // puede reconocer) y los pagos por canales digitales a personas (Yape,
+    // Plin, transferencias), que pueden ser para cualquier cosa y no se pueden
+    // clasificar solos. Cada uno se mide por separado.
+    const isP = (m) => /(^|_)persona$/.test(m || '');
+    const all = inR(D.analytics_merchant_daily, st);
+    const md = all.filter((x) => !isP(x.merchant)), dg = all.filter((x) => isP(x.merchant));
+    const of = (rows, s) => rows.filter((x) => x.source === s);
+    const auto = sum(of(md, 'auto'), 'movements'), arr = sum(of(md, 'arrived'), 'movements'), man = sum(of(md, 'manual'), 'movements');
+    const rec = sum(of(md, 'reclassified'), 'movements'), corr = sum(of(md, 'reclassified').filter((x) => x.engine), 'movements');
     const came = auto + arr;
-    const people = sum(md.filter((x) => (x.source === 'auto' || x.source === 'arrived') && /(^|_)persona$/.test(x.merchant || '')), 'movements');
-    const src = (s) => perDay(bySrc(s), (x) => x.movements);
-    const rk = (D.analytics_merchant_ranking_30d || []).slice().sort((a, b) => num(b.arrived) + num(b.manual_from_pending) - num(a.arrived) - num(a.manual_from_pending));
-    const rc = (D.analytics_merchant_reclassified_30d || []).slice().sort((a, b) => num(b.movements) - num(a.movements));
-    const un = (D.analytics_merchant_unclassified_30d || []).slice().sort((a, b) => num(b.arrived) - num(a.arrived));
+    const dIn = dg.filter((x) => x.source === 'auto' || x.source === 'arrived');
+    const dCame = sum(dIn, 'movements'), dMan = sum(of(dg, 'manual'), 'movements');
+    const src = (rows, s) => perDay(of(rows, s), (x) => x.movements);
+    const rk = (D.analytics_merchant_ranking_30d || []).filter((x) => !isP(x.merchant)).sort((a, b) => num(b.arrived) + num(b.manual_from_pending) - num(a.arrived) - num(a.manual_from_pending));
+    const rc = (D.analytics_merchant_reclassified_30d || []).filter((x) => !isP(x.merchant)).sort((a, b) => num(b.movements) - num(a.movements));
+    const unAll = (D.analytics_merchant_unclassified_30d || []).slice().sort((a, b) => num(b.arrived) - num(a.arrived));
+    const un = unAll.filter((x) => !isP(x.merchant)), dun = unAll.filter((x) => isP(x.merchant));
+    // Las categorías que la gente les pone a mano a sus Yapes y Plines.
+    const dcat = new Map();
+    of(dg, 'manual').concat(of(dg, 'reclassified')).forEach((x) => dcat.set(x.to_category, (dcat.get(x.to_category) || 0) + num(x.movements)));
     return {
       kpis: [
-        kpi('Comercios distintos', N(new Set(md.map((x) => x.merchant)).size), 'en ' + R + ' días'),
-        kpi('Llegan ya clasificados', P(pct(auto, came)), N(auto) + ' de ' + N(came) + ' gastos del correo'),
-        kpi('Precisión automática', auto ? P(Math.round(1000 * (1 - corr / auto)) / 10) : '—', N(corr) + ' corregidos después', auto && corr / auto >= 0.1 ? 'var(--warn)' : null),
-        kpi('Clasificados a mano', N(man), N(rec) + ' reclasificados'),
-        kpi('Pagos a personas', P(pct(people, came)), 'Yape, Plin y transferencias'),
+        kpi('Comercios distintos', N(new Set(md.map((x) => x.merchant)).size), 'con tarjeta, en ' + R + ' días'),
+        kpi('Tarjeta: se clasifican solos', P(pct(auto, came)), N(auto) + ' de ' + N(came) + ' compras con tarjeta'),
+        kpi('Precisión automática', auto ? P(Math.round(1000 * (1 - corr / auto)) / 10) : '—', N(corr) + ' corregidas después', auto && corr / auto >= 0.1 ? 'var(--warn)' : null),
+        kpi('Tarjeta: a mano', N(man), N(rec) + ' reclasificadas'),
+        kpi('Canales digitales', N(dCame), P(pct(dCame, dCame + came)) + ' de los gastos del correo · ' + N(dMan) + ' a mano'),
       ],
       cards: [
-        gauge({ id: 'm-auto', tone: 'green', title: 'Llegan ya clasificados', value: pct(auto, came), caption: 'de los gastos del correo', rows: [{ label: lab('msrcs', 'auto'), value: N(auto), c: COL.gold }, { label: lab('msrcs', 'arrived'), value: N(arr), c: '#fff' }, { label: 'Corregidos después', value: N(corr), c: 'var(--c-orange)' }] }),
-        bars(ctx, { id: 'merchant-src', size: 'lg', title: 'Qué pasa con cada gasto por comercio', sub: 'Gastos del correo que llegaron con categoría o sin ella, y lo que después se clasificó o cambió a mano.', keys: days, series: [{ label: lab('msrcs', 'auto'), c: COL.blue, get: src('auto') }, { label: lab('msrcs', 'arrived'), c: COL.mute, get: src('arrived') }, { label: lab('msrcs', 'manual'), c: COL.ink, get: src('manual') }, { label: lab('msrcs', 'reclassified'), c: COL.a, get: src('reclassified') }] }),
-        table({ id: 'merchant-rank', wide: true, show: 8, title: 'Comercios', sub: '«Solos»: llegaron con categoría. «Precisión»: de lo que se clasificó solo, cuánto no se corrigió después.', meta: '30 días', cols: [{ label: 'Comercio', align: 'left', w: 'minmax(130px,1.8fr)' }, { label: 'Llegaron', bar: true }, { label: 'Solos' }, { label: '% solos', heat: true }, { label: 'Sin categoría' }, { label: 'A mano' }, { label: 'Reclasificados' }, { label: 'Precisión' }], minW: '700px', rows: rk.map((x) => [{ v: mlab(x.merchant), fw: 500 }, nc(x.arrived), N(x.auto), pctLow(ok(x.pct_auto) ? +x.pct_auto : null, -1), N(x.arrived_unclassified), N(x.manual_from_pending), num(x.reclassified) ? { v: N(x.reclassified), color: 'var(--warn)' } : N(x.reclassified), pctLow(ok(x.pct_auto_kept) ? +x.pct_auto_kept : null, 90)]) }),
-        table({ id: 'merchant-reclass', title: 'Los más reclasificados', sub: 'De qué categoría a cuál y quién había puesto la primera.', meta: '30 días', cols: [{ label: 'Comercio', align: 'left', w: 'minmax(110px,1.4fr)' }, { label: 'De → a', align: 'left', w: 'minmax(140px,1.8fr)' }, { label: 'La puso', align: 'left', w: 'minmax(90px,1.1fr)' }, { label: 'Movs.', bar: true }, { label: 'Días' }], minW: '520px', rows: rc.map((x) => [{ v: mlab(x.merchant), fw: 500 }, { v: clab(x.from_category) + ' → ' + clab(x.to_category) }, { v: lab('engine', x.replaced), color: x.replaced === 'usuario' ? 'var(--text2)' : 'var(--warn)' }, nc(x.movements), N(x.days)]) }),
-        rank({ id: 'merchant-auto', title: 'Los que se clasifican solos', sub: 'Con el motor y la categoría que les tocó.', meta: '30 días', c: COL.green, items: (D.analytics_merchant_auto_30d || []).map((x) => ({ label: mlab(x.merchant), value: num(x.movements), note: lab('engine', x.engine) + ' · ' + clab(x.category) })) }),
-        table({ id: 'merchant-unclassified', wide: true, tone: 'dark', title: 'Llegan sin categoría', sub: 'Y la que la gente termina poniéndoles: candidatos a palabra clave o regla de fábrica.', meta: '30 días', cols: [{ label: 'Comercio', align: 'left', w: 'minmax(130px,1.6fr)' }, { label: 'Sin categoría', bar: true }, { label: 'Clasificados a mano' }, { label: 'Categoría que eligen', align: 'left', w: 'minmax(130px,1.6fr)' }, { label: 'Veces' }], minW: '560px', rows: un.map((x) => [{ v: mlab(x.merchant), fw: 500 }, nc(x.arrived), N(x.classified_by_hand), { v: clab(x.top_category) }, N(x.top_category_movements)]) }),
+        gauge({ id: 'm-auto', tone: 'green', title: 'Compras con tarjeta que llegan clasificadas', value: pct(auto, came), caption: 'sin contar Yape, Plin ni transferencias', rows: [{ label: lab('msrcs', 'auto'), value: N(auto), c: COL.gold }, { label: lab('msrcs', 'arrived'), value: N(arr), c: '#fff' }, { label: 'Corregidas después', value: N(corr), c: 'var(--c-orange)' }] }),
+        bars(ctx, { id: 'merchant-src', size: 'lg', title: 'Compras con tarjeta por día', sub: 'Las que llegaron con categoría o sin ella, y lo que después se clasificó o cambió a mano.', keys: days, series: [{ label: lab('msrcs', 'auto'), c: COL.blue, get: src(md, 'auto') }, { label: lab('msrcs', 'arrived'), c: COL.mute, get: src(md, 'arrived') }, { label: lab('msrcs', 'manual'), c: COL.ink, get: src(md, 'manual') }, { label: lab('msrcs', 'reclassified'), c: COL.a, get: src(md, 'reclassified') }] }),
+        table({ id: 'merchant-rank', wide: true, show: 8, title: 'Comercios (tarjeta)', sub: '«Solos»: llegaron con categoría. «Precisión»: de lo que se clasificó solo, cuánto no se corrigió después.', meta: '30 días', cols: [{ label: 'Comercio', align: 'left', w: 'minmax(130px,1.8fr)' }, { label: 'Llegaron', bar: true }, { label: 'Solos' }, { label: '% solos', heat: true }, { label: 'Sin categoría' }, { label: 'A mano' }, { label: 'Reclasificados' }, { label: 'Precisión' }], minW: '700px', rows: rk.map((x) => [{ v: mlab(x.merchant), fw: 500 }, nc(x.arrived), N(x.auto), pctLow(ok(x.pct_auto) ? +x.pct_auto : null, -1), N(x.arrived_unclassified), N(x.manual_from_pending), num(x.reclassified) ? { v: N(x.reclassified), color: 'var(--warn)' } : N(x.reclassified), pctLow(ok(x.pct_auto_kept) ? +x.pct_auto_kept : null, 90)]) }),
+        table({ id: 'merchant-reclass', title: 'Los más reclasificados', sub: 'Compras con tarjeta: de qué categoría a cuál y quién había puesto la primera.', meta: '30 días', cols: [{ label: 'Comercio', align: 'left', w: 'minmax(110px,1.4fr)' }, { label: 'De → a', align: 'left', w: 'minmax(140px,1.8fr)' }, { label: 'La puso', align: 'left', w: 'minmax(90px,1.1fr)' }, { label: 'Movs.', bar: true }, { label: 'Días' }], minW: '520px', rows: rc.map((x) => [{ v: mlab(x.merchant), fw: 500 }, { v: clab(x.from_category) + ' → ' + clab(x.to_category) }, { v: lab('engine', x.replaced), color: x.replaced === 'usuario' ? 'var(--text2)' : 'var(--warn)' }, nc(x.movements), N(x.days)]) }),
+        rank({ id: 'merchant-auto', title: 'Los que se clasifican solos', sub: 'Con el motor y la categoría que les tocó.', meta: '30 días', c: COL.green, items: (D.analytics_merchant_auto_30d || []).filter((x) => !isP(x.merchant)).map((x) => ({ label: mlab(x.merchant), value: num(x.movements), note: lab('engine', x.engine) + ' · ' + clab(x.category) })) }),
+        table({ id: 'merchant-unclassified', wide: true, tone: 'dark', title: 'Comercios que llegan sin categoría', sub: 'Y la que la gente termina poniéndoles: candidatos a palabra clave o regla de fábrica.', meta: '30 días', cols: [{ label: 'Comercio', align: 'left', w: 'minmax(130px,1.6fr)' }, { label: 'Sin categoría', bar: true }, { label: 'Clasificados a mano' }, { label: 'Categoría que eligen', align: 'left', w: 'minmax(130px,1.6fr)' }, { label: 'Veces' }], minW: '560px', rows: un.map((x) => [{ v: mlab(x.merchant), fw: 500 }, nc(x.arrived), N(x.classified_by_hand), { v: clab(x.top_category) }, N(x.top_category_movements)]) }),
+        bars(ctx, { id: 'digital-src', title: 'Canales digitales por día', sub: 'Yape, Plin y transferencias a personas. Pueden ser para cualquier cosa, así que no se miden en la clasificación automática.', keys: days, series: [{ label: 'Llegaron', c: COL.mute, get: perDay(dIn, (x) => x.movements) }, { label: lab('msrcs', 'manual'), c: COL.ink, get: src(dg, 'manual') }] }),
+        table({ id: 'digital-chan', title: 'Canales digitales', sub: 'Cuánto llega por cada canal y qué categoría le pone la gente.', meta: '30 días', cols: [{ label: 'Canal', align: 'left', w: 'minmax(120px,1.4fr)' }, { label: 'Llegaron', bar: true }, { label: 'A mano' }, { label: 'Categoría que eligen', align: 'left', w: 'minmax(120px,1.4fr)' }], minW: '480px', rows: dun.map((x) => [{ v: mlab(x.merchant), fw: 500 }, nc(x.arrived), N(x.classified_by_hand), { v: clab(x.top_category) }]) }),
+        rank({ id: 'digital-cat', title: 'Para qué usan Yape y Plin', sub: 'Las categorías que la gente les pone a mano, en el rango elegido.', c: COL.blue, items: [...dcat.entries()].sort((a, b) => b[1] - a[1]).map(([k, v]) => ({ label: clab(k), value: v })) }),
       ],
     };
   }
