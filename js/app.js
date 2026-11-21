@@ -27,6 +27,14 @@ const IC = {
   right: 'M9 18l6-6-6-6',
   check: 'M20 6L9 17l-5-5',
   grid: 'M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z',
+  search: 'M11 19a8 8 0 1 0 0-16 8 8 0 0 0 0 16zM21 21l-4.35-4.35',
+  calendar: 'M8 2v4M16 2v4M3 10h18M5 4h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2z',
+  trend: 'M23 6l-9.5 9.5-5-5L1 18M17 6h6v6',
+  activity: 'M22 12h-4l-3 9L9 3l-3 9H2',
+  sliders: 'M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6',
+  eye: 'M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8zM12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z',
+  repeat: 'M17 1l4 4-4 4M3 11V9a4 4 0 0 1 4-4h14M7 23l-4-4 4-4M21 13v2a4 4 0 0 1-4 4H3',
+  zap: 'M13 2L3 14h9l-1 8 10-12h-9l1-8z',
 };
 const svg = (k, s) => `<svg width="${s || 18}" height="${s || 18}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${IC[k]}"></path></svg>`;
 // Ícono de cada KPI según su etiqueta.
@@ -51,19 +59,26 @@ class App {
     const q = new URLSearchParams(location.search);
     this.forceDemo = q.has('demo');
     this.captureHash();
-    this.state = { section: SECTIONS.some((s) => s.id === ui.section) || ui.section === 'mas' ? ui.section : 'resumen', range: ui.range || 30, from: ui.from || null, to: ui.to || null, aud: ui.aud || 'all', pick: Array.isArray(ui.pick) ? ui.pick.filter((x) => typeof x === 'string').slice(0, 200) : [], by: ui.by || 'persona', cohort: ui.cohort || '', wide: window.innerWidth >= 900, mode: !this.forceDemo && this.session() ? 'loading' : 'demo', data: null, email: null, notice: this.hashNotice || null, updatedAt: null, demoChosen: !!ui.demo };
+    this.state = { section: SECTIONS.some((s) => s.id === ui.section) || ui.section === 'mas' ? ui.section : 'resumen', range: ui.range || 30, from: ui.from || null, to: ui.to || null, aud: ui.aud || 'all', pick: Array.isArray(ui.pick) ? ui.pick.filter((x) => typeof x === 'string').slice(0, 200) : [], by: ui.by || 'persona', calMonth: null, calDay: null, calKinds: Array.isArray(ui.calKinds) ? ui.calKinds : [], calAuto: ui.calAuto !== false, sideMini: typeof ui.sideMini === 'boolean' ? ui.sideMini : null, cohort: ui.cohort || '', wide: window.innerWidth >= 900, mode: !this.forceDemo && this.session() ? 'loading' : 'demo', data: null, email: null, notice: this.hashNotice || null, updatedAt: null, demoChosen: !!ui.demo };
     this.cards = new Map();
     this.sheet = false;
     this.detail = null;
     this.editing = null;
     this.picking = null;
     this.secMenu = false;
+    this.msEdit = null;
+    this.guide = null;
     this.animKey = null;
-    window.addEventListener('resize', () => { const w = window.innerWidth >= 900; if (w !== this.state.wide) this.setState({ wide: w }); });
+    window.addEventListener('resize', () => { const w = window.innerWidth >= 900; if (w !== this.state.wide || (w && this.sideMini() !== this._mini)) this.setState({ wide: w }); });
     window.addEventListener('scroll', () => this.onScroll(), { passive: true });
-    document.addEventListener('keydown', (e) => { if (e.key !== 'Escape') return; if (this.secMenu) this.toggleSecMenu(false); else if (this.picking) this.openPicker(false); else if (this.editing) this.editTester(null); else if (this.detail) this.openDetail(null); });
+    document.addEventListener('keydown', (e) => { if (e.key !== 'Escape') return; if (this.secMenu) this.toggleSecMenu(false); else if (this.guide) this.openGuide(null); else if (this.msEdit) this.editMs(null); else if (this.picking) this.openPicker(false); else if (this.editing) this.editTester(null); else if (this.detail) this.openDetail(null); });
     root.addEventListener('change', (e) => this.onChange(e));
-    root.addEventListener('input', (e) => { if (e.target.matches('[data-q]')) { rosterQ = e.target.value; this.paintRoster(); } else if (e.target.matches('[data-pq]')) { this.picking.q = e.target.value; this.paintPicker(); } });
+    root.addEventListener('input', (e) => { if (e.target.matches('[data-q]')) { rosterQ = e.target.value; this.paintRoster(); } else if (e.target.matches('[data-pq]')) { this.picking.q = e.target.value; this.paintPicker(); } else if (e.target.matches('[data-gq]')) { this.guide.q = e.target.value; this.paintGuide(); } else if (e.target.matches('[data-sq]')) { this.secQ = e.target.value; const l = this.root.querySelector('[data-smlist]'); if (l) l.innerHTML = secMenuList(this.state.section, this.secQ); } });
+    // Ctrl K (o ⌘ K) abre el buscador de secciones; Enter va a la primera que coincide.
+    document.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k' && this.state.wide) { e.preventDefault(); this.toggleSecMenu(!this.secMenu); }
+      else if (e.key === 'Enter' && this.secMenu && e.target.matches('[data-sq]')) { const f = this.root.querySelector('[data-smlist] [data-act="go"]'); if (f) { this.secMenu = false; this.go(f.dataset.id); } }
+    });
     // La rueda del mouse mueve el menú de secciones de lado a lado.
     root.addEventListener('wheel', (e) => { const t = e.target.closest('[data-tabs]'); if (!t || Math.abs(e.deltaY) <= Math.abs(e.deltaX) || t.scrollWidth <= t.clientWidth) return; e.preventDefault(); t.scrollLeft += e.deltaY; }, { passive: false });
     root.addEventListener('scroll', (e) => { if (e.target.matches && e.target.matches('[data-tabs]')) { this._navX = e.target.scrollLeft; this.navEdges(); } }, true);
@@ -80,7 +95,7 @@ class App {
   }
 
   setState(p) { Object.assign(this.state, p); this.render(); }
-  saveUI(p) { const S = this.state; try { localStorage.setItem(LS_UI, JSON.stringify({ section: S.section, range: S.range, from: S.from, to: S.to, aud: S.aud, pick: S.pick, by: S.by, cohort: S.cohort, demo: S.demoChosen, ...p })); } catch (e) {} }
+  saveUI(p) { const S = this.state; try { localStorage.setItem(LS_UI, JSON.stringify({ section: S.section, range: S.range, from: S.from, to: S.to, aud: S.aud, pick: S.pick, by: S.by, calKinds: S.calKinds, calAuto: S.calAuto, sideMini: S.sideMini, cohort: S.cohort, demo: S.demoChosen, ...p })); } catch (e) {} }
   // Los datos que se dibujan: los de Supabase o, sin sesión, los de ejemplo.
   data() { const S = this.state; return S.mode === 'live' && S.data ? S.data : this._demo || (this._demo = makeDemo()); }
   // Primer y último día del rango. Con «Fechas», dentro de los 90 días cargados.
@@ -142,6 +157,8 @@ class App {
       jobs.push(['analytics_install_daily', 'day=gte.' + addD(today, -89) + '&order=day.asc']);
       jobs.push(['analytics_install_profile', '']);
       jobs.push(['analytics_testers', '']);
+      jobs.push(['analytics_milestones', 'order=day.asc']);
+      jobs.push(['analytics_app_releases', '']);
       jobs.push(['analytics_merchant_person_daily', 'day=gte.' + addD(today, -89) + '&order=day.asc']);
       const userP = fetch(SB_URL + '/auth/v1/user', { headers: { apikey: SB_KEY, Authorization: 'Bearer ' + tk } }).then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
       const failed = [];
@@ -149,14 +166,15 @@ class App {
       const data = {};
       jobs.forEach(([v], i) => (data[v] = res[i]));
       const user = await userP;
-      const empty = jobs.every(([v], i) => V22.includes(v) || V23.includes(v) || !res[i].length);
+      const empty = jobs.every(([v], i) => V22.includes(v) || V23.includes(v) || V25.includes(v) || !res[i].length);
       if (failed.length === jobs.length) throw new Error('ninguna vista respondió. ¿Ya corriste agrupay_analytics_v16.sql?');
-      const miss21 = failed.filter((v) => V21.includes(v)), miss22 = failed.filter((v) => V22.includes(v)), miss23 = failed.filter((v) => V23.includes(v)), other = failed.filter((v) => !V21.includes(v) && !V22.includes(v) && !V23.includes(v));
+      const miss21 = failed.filter((v) => V21.includes(v)), miss22 = failed.filter((v) => V22.includes(v)), miss23 = failed.filter((v) => V23.includes(v)), miss25 = failed.filter((v) => V25.includes(v)), other = failed.filter((v) => !V21.includes(v) && !V22.includes(v) && !V23.includes(v) && !V25.includes(v));
       const parts = [];
       if (other.length) parts.push('No se pudieron leer ' + other.length + ' vistas: ' + other.slice(0, 4).join(', ') + (other.length > 4 ? '…' : '') + '.');
       if (miss21.length) parts.push('Faltan las vistas de comercios, hoja de clasificar y suscripciones (' + miss21.length + '). Corre agrupay_analytics_v21_merchants.sql en este proyecto y toca Actualizar.');
       if (miss22.length) parts.push('Faltan las vistas de testers e hipótesis: corre sql/altanto_analytics_v22_testers.sql (está en este repo) y toca Actualizar.' + (aud !== 'all' ? ' Sin ella, el filtro Testers / No testers no separa nada.' : ''));
       if (miss23.length) parts.push('Falta la vista de Monitoreo de comercios: corre sql/altanto_analytics_v23_comercios.sql (está en este repo) y toca Actualizar.');
+      if (miss25.length) parts.push('Falta la Bitácora: corre sql/altanto_analytics_v25_bitacora.sql (está en este repo) y toca Actualizar.');
       let notice = parts.join(' ') || null;
       if (!notice && empty) notice = this.state.pick.length ? 'Ninguna vista trae datos de las personas elegidas en este rango.' : aud !== 'all' ? 'Ninguna vista trae datos para «' + lab('aud', aud) + '». ¿Ya marcaste a los testers en la sección Testers?' : await this.diagnose(tk, user);
       this.setState({ mode: 'live', data, email: user.email || 'sesión iniciada', notice, updatedAt: new Date() });
@@ -205,7 +223,6 @@ class App {
     if (bar) { this.showTip(bar); return; }
     const el = e.target.closest('[data-act]');
     // Un toque fuera del menú de secciones lo cierra.
-    if (this.secMenu && !e.target.closest('[data-secmenu]') && !(el && el.dataset.act === 'secmenu')) this.toggleSecMenu(false);
     if (!el) return;
     const a = el.dataset.act;
     if (a === 'go') { this.secMenu = false; this.go(el.dataset.id); }
@@ -227,6 +244,21 @@ class App {
     else if (a === 'p-drop') this.applyPick(this.state.pick.filter((x) => x !== el.dataset.id));
     else if (a === 'navscroll') { const t = this.root.querySelector('[data-tabs]'); if (t) t.scrollBy({ left: +el.dataset.n * t.clientWidth * 0.7, behavior: 'smooth' }); }
     else if (a === 'secmenu') this.toggleSecMenu(!this.secMenu);
+    else if (a === 'secmenu-close') this.toggleSecMenu(false);
+    else if (a === 'side-mini') { this.setState({ sideMini: !this.sideMini() }); this.saveUI(); }
+    else if (a === 'guide') this.openGuide(el.dataset.id || this.state.section);
+    else if (a === 'g-close') this.openGuide(null);
+    else if (a === 'g-all') { this.guide.all = !this.guide.all; this.paintGuide(); }
+    else if (a === 'cal-move') { const m = this.calMonth(); const d = new Date(m + '-01T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() + +el.dataset.n); this.setState({ calMonth: d.toISOString().slice(0, 7), calDay: null }); }
+    else if (a === 'cal-today') this.setState({ calMonth: null, calDay: limaToday() });
+    else if (a === 'cal-day') { const d = el.dataset.d; this.setState({ calDay: this.state.calDay === d ? null : d, calMonth: d.slice(0, 7) }); }
+    else if (a === 'cal-kind') { const k = el.dataset.k; let ks = this.state.calKinds.slice(); ks = ks.includes(k) ? ks.filter((x) => x !== k) : ks.concat(k); this.setState({ calKinds: ks }); this.saveUI(); }
+    else if (a === 'cal-auto') { this.setState({ calAuto: !this.state.calAuto }); this.saveUI(); }
+    else if (a === 'm-new') this.editMs({ day: el.dataset.d || this.state.calDay || limaToday() });
+    else if (a === 'm-edit') { const m = milestones(this.data()).find((x) => x.id === el.dataset.id); if (m) this.editMs(m.auto ? { day: m.day, kind: m.kind === 'cohort_d14' ? 'survey' : m.kind, title: m.title, cohort: m.cohort, version: m.version } : m); }
+    else if (a === 'm-close') this.editMs(null);
+    else if (a === 'm-save') { const f = this.root.querySelector('[data-mform]'); if (f && f.reportValidity()) this.saveMs(f); }
+    else if (a === 'm-del') this.deleteMs();
     else if (a === 'by') { this.setState({ by: el.dataset.n }); this.saveUI(); }
     else if (a === 't-toggle') { const p = people(this.data()).find((x) => x.id === el.dataset.id); if (p) this.saveTesters([{ install_id: p.id, is_tester: !p.tester }]); }
     else if (a === 'mark-tf') {
@@ -267,13 +299,68 @@ class App {
   }
 
   // ── Menú de secciones ──────────────────────────────────────────────────
-  toggleSecMenu(open) { this.secMenu = open; const m = this.root.querySelector('[data-secmenu]'); if (m) m.classList.toggle('open', open); const b = this.root.querySelector('[data-act="secmenu"]'); if (b) b.setAttribute('aria-expanded', open); }
+  sideMini() { return this.state.sideMini == null ? window.innerWidth < 1180 : this.state.sideMini; }
+  toggleSecMenu(open) {
+    this.secMenu = open;
+    this.secQ = '';
+    const m = this.root.querySelector('[data-secmenu]'), bk = this.root.querySelector('.sec-back');
+    if (m) { m.classList.toggle('open', open); m.innerHTML = renderSecMenu(this.state.section, ''); }
+    if (bk) bk.classList.toggle('open', open);
+    if (open) { const i = this.root.querySelector('[data-sq]'); if (i) i.focus({ preventScroll: true }); }
+  }
   // Flechas y degradado sólo donde queda menú escondido.
   navEdges() {
     const t = this.root.querySelector('[data-tabs]'), w = t && t.parentElement;
     if (!w) return;
     w.classList.toggle('can-l', t.scrollLeft > 4);
     w.classList.toggle('can-r', t.scrollLeft + t.clientWidth < t.scrollWidth - 4);
+  }
+
+  // ── Bitácora ──────────────────────────────────────────────────────────
+  calMonth() { return this.state.calMonth || (this.state.calDay || limaToday()).slice(0, 7); }
+  editMs(m) { this.msEdit = m; if (!m) document.documentElement.classList.remove('noscroll'); this.paintDetail(!!m); }
+  async saveMs(form) {
+    const f = new FormData(form);
+    const txt = (k) => { const v = String(f.get(k) == null ? '' : f.get(k)).trim(); return v || null; };
+    const row = { day: txt('day'), end_day: txt('end_day'), kind: txt('kind') || 'other', title: txt('title'), notes: txt('notes'), cohort: txt('cohort'), version: txt('version'), link: txt('link'), updated_at: new Date().toISOString() };
+    if (row.end_day && row.end_day < row.day) row.end_day = null;
+    if (this.msEdit.id) row.id = this.msEdit.id;
+    const S = this.state, D = this.data();
+    let saved = Object.assign({ id: row.id || 'local-' + Date.now(), created_by: S.email || null }, row);
+    if (S.mode === 'live') {
+      try { saved = await saveMilestone(row, await this.token()); }
+      catch (e) { this.setState({ notice: 'No se guardó el hito: ' + e.message }); return; }
+    }
+    const list = D.analytics_milestones || (D.analytics_milestones = []);
+    const i = list.findIndex((x) => x.id === saved.id);
+    if (i >= 0) list[i] = saved; else list.push(saved);
+    delete D._ms;
+    this.msEdit = null;
+    document.documentElement.classList.remove('noscroll');
+    this.setState({ calDay: saved.day.slice(0, 10), calMonth: saved.day.slice(0, 7), notice: S.mode !== 'live' ? 'Con los datos de ejemplo los hitos no se guardan: se pierden al recargar.' : null });
+  }
+  async deleteMs() {
+    const m = this.msEdit;
+    if (!m || !m.id || !window.confirm('¿Borrar «' + m.title + '»? No se puede deshacer.')) return;
+    const S = this.state, D = this.data();
+    if (S.mode === 'live') {
+      try { await deleteMilestone(m.id, await this.token()); }
+      catch (e) { this.setState({ notice: 'No se borró: ' + e.message }); return; }
+    }
+    D.analytics_milestones = (D.analytics_milestones || []).filter((x) => x.id !== m.id);
+    delete D._ms;
+    this.msEdit = null;
+    document.documentElement.classList.remove('noscroll');
+    this.render();
+  }
+
+  // ── Guía ──────────────────────────────────────────────────────────────
+  openGuide(id) { this.guide = id ? { id, q: '', all: false } : null; if (!id) document.documentElement.classList.remove('noscroll'); this.paintDetail(!!id); }
+  paintGuide() {
+    const host = this.root.querySelector('[data-glist]');
+    if (host) host.innerHTML = guideBody(this.guide);
+    const b = this.root.querySelector('[data-act="g-all"]');
+    if (b) b.classList.toggle('on', this.guide.all);
   }
 
   // ── Personas elegidas ──────────────────────────────────────────────────
@@ -350,6 +437,19 @@ class App {
   openDetail(id) { this.detail = id; this.paintDetail(true); }
   paintDetail(anim) {
     const host = this.root.querySelector('[data-dlg]');
+    if (this.guide && host) {
+      document.documentElement.classList.add('noscroll');
+      host.innerHTML = renderGuide(this.guide, anim);
+      return;
+    }
+    if (this.msEdit && host) {
+      document.documentElement.classList.add('noscroll');
+      const D = this.data();
+      const cohorts = [...new Set((D.analytics_testers || []).map((t) => t.cohort).concat((D.analytics_milestones || []).map((m) => m.cohort)).filter(Boolean))].sort();
+      host.innerHTML = renderMsEditor(this.msEdit, cohorts, anim);
+      if (anim) { const i = host.querySelector('input[name="title"]'); if (i && this.state.wide) i.focus({ preventScroll: true }); }
+      return;
+    }
     if (this.picking && host) {
       document.documentElement.classList.add('noscroll');
       host.innerHTML = renderPicker(this.pickHits(), this.picking, anim);
@@ -458,7 +558,8 @@ class App {
     const { from, to } = this.span();
     const days = [];
     for (let d = from; d <= to; d = addD(d, 1)) days.push(d);
-    const ctx = { D: data, today, start: from, end: to, days, range: days.length, wide: S.wide, aud: S.aud, pick: new Set(S.pick), by: S.by, cohort: S.cohort };
+    const ctx = { D: data, today, start: from, end: to, days, range: days.length, wide: S.wide, aud: S.aud, pick: new Set(S.pick), by: S.by, cohort: S.cohort, cal: { month: this.calMonth(), day: S.calDay, kinds: S.calKinds, auto: S.calAuto } };
+    CUR_SEC = sec.id;
     let built;
     let buildError = null;
     try { built = build(sec.id, ctx); } catch (e) { console.error(e); buildError = e; built = { kpis: [], cards: [] }; }
@@ -469,7 +570,7 @@ class App {
     // Con los datos de ejemplo sólo las secciones por persona cambian con la audiencia.
     const audNote = !live && !loading && (S.aud !== 'all' || S.pick.length) && !PEOPLE_SECTIONS.includes(sec.id) ? 'Con los datos de ejemplo, los filtros de audiencia y de personas sólo cambian Hipótesis, Testers y Monitoreo de comercios. Con datos reales filtran todas las secciones.' : null;
     // Las animaciones de entrada sólo corren al cambiar de sección, rango, audiencia o datos.
-    const key = [sec.id, from, to, S.aud, S.pick.join(','), S.mode, S.wide].join('|');
+    const key = [sec.id, from, to, S.aud, S.pick.join(','), S.mode, S.wide, sec.id === 'bitacora' ? this.calMonth() : ''].join('|');
     const enter = key !== this.animKey;
     this.animKey = key;
     return { loading, live, range, built, buildError, status, footer, enter, audNote };
@@ -480,6 +581,7 @@ class App {
     const S = this.state, today = limaToday();
     const seg = (act, opts, cur) => `<div class="${mobile ? 'm-seg' : 'seg'}"${mobile ? ` style="grid-template-columns:repeat(${opts.length},1fr)"` : ''}>${opts.map(([v, l]) => `<button class="${String(v) === String(cur) ? 'on' : ''}" data-act="${act}" data-n="${esc(v)}">${esc(l)}</button>`).join('')}</div>`;
     // Con personas elegidas, ningún botón de audiencia queda marcado.
+    if (sec.noAud) return '';
     const out = [seg('aud', Object.entries(LBL.aud), S.pick.length ? null : S.aud)];
     const all = people(this.data());
     const one = S.pick.length === 1 ? all.find((p) => p.id === S.pick[0]) : null;
@@ -514,50 +616,49 @@ class App {
     const { loading, live, built, buildError, status, footer, enter, audNote } = this.view(sec);
     document.title = sec.label + ' · AlTanto Analytics';
     const grouped = SEC_GROUPS.map((g) => ({ label: g.label, list: g.ids.map((id) => SECTIONS.find((s) => s.id === id)).filter(Boolean) }));
-    const nav = grouped.map((g) => g.list.map((s) => `<button class="${s.id === sec.id ? 'on' : ''}" data-act="go" data-id="${esc(s.id)}">${esc(s.label)}</button>`).join('')).join('<span class="tabs-sep" aria-hidden="true"></span>');
-    const menu = grouped.map((g) => `<div class="sm-group"><div class="sm-title">${esc(g.label)}</div>${g.list.map((s) => `<button class="sm-item${s.id === sec.id ? ' on' : ''}" data-act="go" data-id="${esc(s.id)}"><b>${esc(s.label)}</b><span>${esc(s.desc)}</span></button>`).join('')}</div>`).join('');
+    const group = grouped.find((g) => g.list.some((s) => s.id === sec.id));
+    const mini = this.sideMini();
+    this._mini = mini;
+    const side = grouped.map((g) => `<div class="side-group"><div class="side-title">${esc(g.label)}</div>${g.list.map((s) => `<button class="side-item${s.id === sec.id ? ' on' : ''}" data-act="go" data-id="${esc(s.id)}"${mini ? ` title="${esc(s.label)}"` : ''} aria-current="${s.id === sec.id ? 'page' : 'false'}">${svg(SEC_ICON[s.id] || 'chart', 18)}<span>${esc(s.label)}</span></button>`).join('')}</div>`).join('');
     const who = live && S.email ? S.email.trim()[0].toUpperCase() : '';
 
     this.root.innerHTML = `
-      <div class="shell${enter ? ' enter' : ''}">
-        <header class="top anim" style="--i:0">
-          <div class="brand"><img class="logo" src="icons/icon-192.png" alt=""><div class="brand-name">AlTanto<span>Analytics</span></div></div>
-          <div class="top-right">
-            <div class="status-pill" title="${esc(status.text)}"><span class="dot" style="background:${status.dot}"></span><span class="status-text">${esc(status.text)}</span></div>
-            ${S.mode === 'demo' && !this.forceDemo ? `<button class="pill primary" data-act="login">Entrar con Google</button>` : ''}
-            ${live || loading ? `<button class="round" data-act="reload" title="Actualizar" aria-label="Actualizar"${loading ? ' disabled' : ''}>${svg('refresh', 17)}</button><button class="round" data-act="logout" title="Salir" aria-label="Salir">${svg('logout', 17)}</button>` : ''}
-            ${who ? `<div class="avatar" title="${esc(S.email)}">${esc(who)}</div>` : ''}
-          </div>
-        </header>
-        <div class="tabs-wrap anim" style="--i:1">
-          <div class="tabs-scroll">
-            <button class="tabs-arr l" data-act="navscroll" data-n="-1" aria-label="Ver secciones anteriores">${svg('left', 16)}</button>
-            <nav class="tabs" data-tabs>${nav}</nav>
-            <button class="tabs-arr r" data-act="navscroll" data-n="1" aria-label="Ver más secciones">${svg('right', 16)}</button>
-          </div>
-          <button class="tabs-all" data-act="secmenu" aria-haspopup="true" aria-expanded="${this.secMenu}">${svg('grid', 16)}<span>Todas</span></button>
-          <div class="sec-menu${this.secMenu ? ' open' : ''}" data-secmenu>${menu}</div>
+      <div class="frame${mini ? ' mini' : ''}">
+        <aside class="side" aria-label="Secciones">
+          <div class="side-brand"><img class="logo" src="icons/icon-192.png" alt=""><div class="brand-name">AlTanto<span>Analytics</span></div></div>
+          <button class="side-search" data-act="secmenu" aria-haspopup="dialog" title="Buscar sección (Ctrl K)">${svg('search', 17)}<span>Buscar sección</span><kbd>Ctrl K</kbd></button>
+          <nav class="side-nav" data-side>${side}</nav>
+          <button class="side-toggle" data-act="side-mini" aria-label="${mini ? 'Mostrar el menú completo' : 'Achicar el menú'}" title="${mini ? 'Mostrar el menú completo' : 'Achicar el menú'}">${svg(mini ? 'right' : 'left', 16)}<span>Achicar menú</span></button>
+        </aside>
+        <div class="shell${enter ? ' enter' : ''}">
+          <header class="top anim" style="--i:0">
+            <div class="crumb">${group ? `<span>${esc(group.label)}</span>${svg('right', 14)}` : ''}<b>${esc(sec.label)}</b></div>
+            <div class="top-right">
+              <div class="status-pill" title="${esc(status.text)}"><span class="dot" style="background:${status.dot}"></span><span class="status-text">${esc(status.text)}</span></div>
+              ${S.mode === 'demo' && !this.forceDemo ? `<button class="pill primary" data-act="login">Entrar con Google</button>` : ''}
+              ${live || loading ? `<button class="round" data-act="reload" title="Actualizar" aria-label="Actualizar"${loading ? ' disabled' : ''}>${svg('refresh', 17)}</button><button class="round" data-act="logout" title="Salir" aria-label="Salir">${svg('logout', 17)}</button>` : ''}
+              ${who ? `<div class="avatar" title="${esc(S.email)}">${esc(who)}</div>` : ''}
+            </div>
+          </header>
+          <section class="hero anim" style="--i:1">
+            <div class="hero-text"><div class="h1-row"><h1>${esc(sec.label)}</h1><button class="help-btn" data-act="guide" aria-label="Guía de ${esc(sec.label)}" title="Qué significa cada cosa">?</button></div><div class="desc">${esc(sec.desc)}</div></div>
+            <div class="hero-ctl">${this.controls(sec, false)}</div>
+          </section>
+          ${S.notice ? `<div class="notice">${esc(S.notice)}</div>` : ''}
+          ${audNote ? `<div class="notice">${esc(audNote)}</div>` : ''}
+          ${buildError ? `<div class="notice">No se pudo armar esta sección: ${esc(buildError.message)}</div>` : ''}
+          <section class="kpis"${loading ? ' aria-busy="true"' : ''}>${built.kpis.map((k, i) => (loading ? renderKpiSkeleton(k, i + 2) : renderKpi(k, i + 2))).join('')}</section>
+          <section class="grid"${loading ? ' aria-busy="true"' : ''}>${built.cards.map((c, i) => (loading ? renderCardSkeleton(c, i + 5) : renderCard(c, false, i + 5))).join('')}</section>
+          <div class="footer">${esc(footer)}</div>
         </div>
-        <section class="hero anim" style="--i:2">
-          <div class="hero-text"><h1>${esc(sec.label)}</h1><div class="desc">${esc(sec.desc)}</div></div>
-          <div class="hero-ctl">${this.controls(sec, false)}</div>
-        </section>
-        ${S.notice ? `<div class="notice">${esc(S.notice)}</div>` : ''}
-        ${audNote ? `<div class="notice">${esc(audNote)}</div>` : ''}
-        ${buildError ? `<div class="notice">No se pudo armar esta sección: ${esc(buildError.message)}</div>` : ''}
-        <section class="kpis"${loading ? ' aria-busy="true"' : ''}>${built.kpis.map((k, i) => (loading ? renderKpiSkeleton(k, i + 3) : renderKpi(k, i + 3))).join('')}</section>
-        <section class="grid"${loading ? ' aria-busy="true"' : ''}>${built.cards.map((c, i) => (loading ? renderCardSkeleton(c, i + 6) : renderCard(c, false, i + 6))).join('')}</section>
-        <div class="footer">${esc(footer)}</div>
       </div>
+      <div class="sec-back${this.secMenu ? ' open' : ''}" data-act="secmenu-close"></div>
+      <div class="sec-menu${this.secMenu ? ' open' : ''}" data-secmenu role="dialog" aria-label="Todas las secciones">${renderSecMenu(sec.id, this.secQ || '')}</div>
       <div data-dlg></div>`;
-    // El menú no salta al volver a dibujar: vuelve a donde estaba y sólo se mueve si la sección elegida queda fuera.
-    const tb = this.root.querySelector('[data-tabs]'), on = tb && tb.querySelector('.on');
-    if (tb) {
-      if (this._navX != null) tb.scrollLeft = this._navX;
-      if (on && (on.offsetLeft < tb.scrollLeft || on.offsetLeft + on.offsetWidth > tb.scrollLeft + tb.clientWidth)) tb.scrollLeft = Math.max(0, on.offsetLeft - (tb.clientWidth - on.offsetWidth) / 2);
-      this._navX = tb.scrollLeft;
-    }
-    this.navEdges();
+    // El menú lateral no salta al volver a dibujar.
+    const sn = this.root.querySelector('[data-side]');
+    if (sn) { if (this._sideY != null) sn.scrollTop = this._sideY; sn.addEventListener('scroll', () => { this._sideY = sn.scrollTop; }, { passive: true }); }
+    if (this.secMenu) { const i = this.root.querySelector('[data-sq]'); if (i) i.focus({ preventScroll: true }); }
   }
 
   // ── Móvil (< 900 px): app de iPhone con barra de pestañas ──────────────
@@ -590,7 +691,7 @@ class App {
 
     let body;
     if (sec) {
-      body = `<div class="m-head anim" style="--i:0"><h1>${esc(sec.label)}</h1><div class="desc">${esc(sec.desc)}</div></div>
+      body = `<div class="m-head anim" style="--i:0"><div class="h1-row"><h1>${esc(sec.label)}</h1><button class="help-btn" data-act="guide" aria-label="Guía de ${esc(sec.label)}">?</button></div><div class="desc">${esc(sec.desc)}</div></div>
         <div class="m-pad m-ctl anim" style="--i:1">${this.controls(sec, true)}</div>
         ${S.notice ? `<div class="m-pad"><div class="notice">${esc(S.notice)}</div></div>` : ''}
         ${audNote ? `<div class="m-pad"><div class="notice">${esc(audNote)}</div></div>` : ''}
@@ -645,11 +746,22 @@ class App {
 const MAIN_TABS = ['resumen', 'hipotesis', 'testers', 'activacion'];
 // Cómo se agrupan las secciones en el menú, en «Todas» y en «Más».
 const SEC_GROUPS = [
-  { label: 'Prueba con usuarios', ids: ['resumen', 'hipotesis', 'testers'] },
+  { label: 'Prueba con usuarios', ids: ['resumen', 'hipotesis', 'testers', 'bitacora'] },
   { label: 'Uso del producto', ids: ['activacion', 'uso', 'adopcion'] },
   { label: 'Correo y clasificación', ids: ['correo', 'clasificacion', 'comercios', 'monitoreo', 'suscripciones'] },
   { label: 'Negocio y calidad', ids: ['pro', 'calidad', 'versiones'] },
 ];
+// Ícono de cada sección en el menú lateral.
+const SEC_ICON = { resumen: 'chart', hipotesis: 'target', testers: 'users', bitacora: 'calendar', activacion: 'trend', uso: 'activity', adopcion: 'sliders', correo: 'mail', clasificacion: 'tag', comercios: 'store', monitoreo: 'eye', suscripciones: 'repeat', pro: 'star', calidad: 'zap', versiones: 'layers' };
+function renderSecMenu(cur, q) {
+  return `<div class="sm-head">${svg('search', 18)}<input type="search" data-sq value="${esc(q)}" placeholder="Busca una sección: retención, comercios, versiones…" aria-label="Buscar sección"><kbd>Esc</kbd></div><div class="sm-list" data-smlist>${secMenuList(cur, q)}</div>`;
+}
+function secMenuList(cur, q) {
+  const f = fold((q || '').trim());
+  const groups = SEC_GROUPS.map((g) => ({ label: g.label, list: g.ids.map((id) => SECTIONS.find((s) => s.id === id)).filter((s) => s && (!f || fold(s.label + ' ' + s.desc + ' ' + g.label).includes(f))) })).filter((g) => g.list.length);
+  if (!groups.length) return `<div class="empty">Ninguna sección coincide con «${esc(q)}».</div>`;
+  return groups.map((g) => `<div class="sm-group"><div class="sm-title">${esc(g.label)}</div>${g.list.map((s) => `<button class="sm-item${s.id === cur ? ' on' : ''}" data-act="go" data-id="${esc(s.id)}"><span class="sm-ic">${svg(SEC_ICON[s.id] || 'chart', 18)}</span><span class="sm-tx"><b>${esc(s.label)}</b><span>${esc(s.desc)}</span></span></button>`).join('')}</div>`).join('');
+}
 const pickCount = (n) => n + (n === 1 ? ' persona' : ' personas');
 
 // Hoja para elegir personas por ID, correo o alias (una o varias).
@@ -679,7 +791,8 @@ const PEOPLE_SECTIONS = ['hipotesis', 'testers', 'monitoreo'];
 let rosterQ = '';
 
 function renderKpi(k, i) {
-  return `<div class="kpi anim" style="--i:${i}"><div class="kpi-ic">${svg(kIcon(k.label), 19)}</div><div class="kpi-tx"><div class="kpi-value" style="color:${esc(k.color)}">${esc(k.value)}</div><div class="kpi-label">${esc(k.label)}</div>${k.sub ? `<div class="kpi-sub">${esc(k.sub)}</div>` : ''}</div></div>`;
+  const def = guideDef(k.label);
+  return `<div class="kpi anim${def ? ' has-def' : ''}" style="--i:${i}"${def ? ` title="${esc(k.label + ': ' + def)}"` : ''}><div class="kpi-ic">${svg(kIcon(k.label), 19)}</div><div class="kpi-tx"><div class="kpi-value" style="color:${esc(k.color)}">${esc(k.value)}</div><div class="kpi-label">${esc(k.label)}</div>${k.sub ? `<div class="kpi-sub">${esc(k.sub)}</div>` : ''}</div></div>`;
 }
 
 // Esqueletos: el título de cada tarjeta es fijo de la sección; los valores
@@ -843,6 +956,20 @@ function renderBody(c, mobile, full) {
     </div>`;
   }
 
+  if (t === 'calendar') {
+    const wd = ['Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb', 'Dom'];
+    return `<div class="cal">
+      <div class="cal-nav"><button class="dstep" data-act="cal-move" data-n="-1" aria-label="Mes anterior">${svg('left', 16)}</button><button class="pill ghost small" data-act="cal-today">Hoy</button><button class="dstep" data-act="cal-move" data-n="1" aria-label="Mes siguiente">${svg('right', 16)}</button><button class="pill primary small cal-add" data-act="m-new">+ Anotar hito</button></div>
+      <div class="cal-grid">${wd.map((d) => `<div class="cal-wd">${d}</div>`).join('')}${c.cells.map((x) => `<button class="cal-cell${x.out ? ' out' : ''}${x.today ? ' today' : ''}${x.sel ? ' sel' : ''}${x.evs.length ? ' has' : ''}" data-act="cal-day" data-d="${esc(x.d)}" aria-label="${esc(fd(x.d))}${x.evs.length ? ', ' + x.evs.length + ' hitos' : ''}"><span class="cal-n">${x.n}</span>${x.evs.slice(0, 4).map((e) => `<span class="cal-ev${e.auto ? ' auto' : ''}" style="--c:${e.c}">${esc(e.title)}</span>`).join('')}${x.evs.length > 4 ? `<span class="cal-more">+${x.evs.length - 4}</span>` : ''}</button>`).join('')}</div>
+    </div>`;
+  }
+  if (t === 'mlist') {
+    return `<div class="mlist">${c.groups.map((g) => (g.label ? `<div class="ml-h">${esc(g.label)}</div>` : '') + (g.items.length ? g.items.map((m) => msItem(m, !!c.day)).join('') : `<div class="ml-empty">${c.day ? 'Nada anotado ese día.' : 'Nada todavía.'}</div>`)).join('')}${c.day ? `<button class="pill primary small ml-add" data-act="m-new" data-d="${esc(c.day)}">+ Anotar el ${esc(fd(c.day))}</button>` : ''}</div>`;
+  }
+  if (t === 'timeline') {
+    return `<div class="tl"><div class="tl-filters">${c.kinds.map((k) => `<button class="kchip${k.on ? ' on' : ''}" data-act="cal-kind" data-k="${esc(k.k)}" style="--c:${k.c}"><i></i>${esc(k.label)}<small>${k.n}</small></button>`).join('')}<button class="kchip auto${c.auto ? ' on' : ''}" data-act="cal-auto">${c.auto ? svg('check', 12) : ''}Automáticos</button></div>
+      ${c.items.length ? `<div class="tl-list">${c.items.map((m) => msItem(m, true)).join('')}</div>` : '<div class="empty">Nada con estos filtros.</div>'}</div>`;
+  }
   if (t === 'roster') {
     const tf = c.people.filter((p) => p.channel === 'TestFlight' && !p.tester).length;
     return `<div class="roster">
@@ -913,6 +1040,97 @@ function renderEditor(p, opts, anim) {
         <div class="factions"><button type="button" class="pill" data-act="t-close">Cancelar</button><button type="button" class="pill primary" data-act="t-save">Guardar</button></div>
       </form>
     </div>`;
+}
+
+// ── Bitácora ────────────────────────────────────────────────────────────
+// Sección en pantalla, para que los KPI busquen su definición en la guía correcta.
+let CUR_SEC = 'resumen';
+// guide.js puede llegar después (caché del navegador): sin él, el panel sigue funcionando sin guía.
+const G = () => (typeof GUIDE !== 'undefined' ? GUIDE : { general: { label: 'Conceptos generales', terms: [] } });
+const guideDef = (label) => { const all = G(), g = all[CUR_SEC]; const x = (g && g.terms.find((t) => t.t === label)) || all.general.terms.find((t) => t.t === label); return x ? x.d : null; };
+const safeUrl = (u) => (/^https?:\/\//i.test(String(u || '').trim()) ? String(u).trim() : '');
+
+// Cómo cambió una métrica de la semana antes a la semana después.
+function impTxt(label, pair, points) {
+  const [a, b] = pair;
+  if (a == null || b == null) return '';
+  const fmt = (v) => (points ? P(r1(v)) : N(r1(v)));
+  const diff = points ? b - a : a ? ((b - a) / a) * 100 : null;
+  if (diff == null) return '';
+  const cls = Math.abs(diff) < (points ? 1 : 3) ? 'flat' : diff > 0 ? 'up' : 'down';
+  return `<span class="imp ${cls}"><em>${esc(label)}</em>${esc(fmt(a))} → ${esc(fmt(b))}<b>${diff > 0 ? '+' : ''}${esc(points ? r1(diff) + ' pts' : P(r1(diff)))}</b></span>`;
+}
+function msItem(m, long) {
+  const imp = long && m.imp;
+  const link = safeUrl(m.link);
+  return `<div class="ms${m.auto ? ' auto' : ''}" style="--c:${m.c}">
+    <div class="ms-date"><b>${esc(fd(m.day))}</b>${m.end ? `<span>al ${esc(fd(m.end))}</span>` : ''}</div>
+    <div class="ms-main">
+      <div class="ms-top"><span class="ms-kind">${esc(m.klabel)}</span>${m.auto ? '<span class="ms-auto">Automático</span>' : ''}${m.cohort ? `<span class="ms-tag">${esc(m.cohort)}</span>` : ''}${m.version && !m.auto ? `<span class="ms-tag">v${esc(m.version)}</span>` : ''}</div>
+      <div class="ms-title">${esc(m.title)}</div>
+      ${m.notes ? `<div class="ms-notes">${esc(m.notes)}</div>` : ''}
+      ${imp ? `<div class="ms-imp">${impTxt('DAU', imp.dau, false)}${impTxt('Clasif. automática', imp.auto, true)}${imp.partial ? `<span class="ms-part">después: ${imp.days} de 7 días</span>` : ''}</div>` : ''}
+      ${link || m.by ? `<div class="ms-foot">${link ? `<a href="${esc(link)}" target="_blank" rel="noopener noreferrer">Abrir enlace</a>` : ''}${m.by ? `<span>${esc(m.by)}</span>` : ''}</div>` : ''}
+    </div>
+    <button class="pill ghost small" data-act="m-edit" data-id="${esc(m.id)}" title="${m.auto ? 'Anotar algo sobre este hito' : 'Editar'}">${m.auto ? 'Anotar' : 'Editar'}</button>
+  </div>`;
+}
+function renderMsEditor(m, cohorts, anim) {
+  const v = (k) => esc(m[k] == null ? '' : String(m[k]));
+  const fld = (label, html, cls) => `<label class="fld${cls ? ' ' + cls : ''}"><span>${esc(label)}</span>${html}</label>`;
+  const editing = !!m.id;
+  return `<div class="dlg-back${anim ? ' anim-in' : ''}" data-act="m-close"></div>
+    <div class="dlg dlg-form ms-dlg${anim ? ' anim-in' : ''}" role="dialog" aria-modal="true" aria-label="Hito">
+      <div class="dlg-head">
+        <div class="card-titles"><div class="dlg-kicker">Bitácora</div><div class="dlg-title">${editing ? 'Editar hito' : 'Anotar un hito'}</div><div class="card-sub">Lo que pasó (o va a pasar) y por qué importa. Lo ven todos los administradores del panel.</div></div>
+        <button class="icon-btn" data-act="m-close" aria-label="Cerrar">${svg('close', 18)}</button>
+      </div>
+      <form class="dlg-body" data-mform onsubmit="return false">
+        <div class="fgrid">
+          ${fld('Qué pasó', `<input name="title" type="text" required maxlength="200" value="${v('title')}" placeholder="Llamada con 5 testers de Prueba 1">`, 'wide')}
+          ${fld('Tipo', `<select name="kind">${MKIND_MANUAL.map((k) => `<option value="${k}"${(m.kind || 'other') === k ? ' selected' : ''}>${esc(mkLab(k))}</option>`).join('')}</select>`)}
+          ${fld('Fecha', `<input name="day" type="date" required value="${v('day')}">`)}
+          ${fld('Hasta (si dura varios días)', `<input name="end_day" type="date" value="${v('end')}">`)}
+          ${fld('Grupo de testers', `<input name="cohort" type="text" list="dl-mcohort" maxlength="40" value="${v('cohort')}" placeholder="Prueba 1">`)}
+          ${fld('Versión de la app', `<input name="version" type="text" maxlength="20" value="${v('version')}" placeholder="3.8.4">`)}
+          ${fld('Enlace', `<input name="link" type="url" maxlength="500" value="${v('link')}" placeholder="https://miro.com/…">`)}
+          ${fld('Notas: qué aprendimos o decidimos', `<textarea name="notes" rows="4" maxlength="2000">${v('notes')}</textarea>`, 'wide')}
+        </div>
+        <datalist id="dl-mcohort">${cohorts.map((x) => `<option value="${esc(x)}"></option>`).join('')}</datalist>
+        <div class="factions">${editing ? '<button type="button" class="pill ghost danger" data-act="m-del">Borrar</button>' : ''}<button type="button" class="pill" data-act="m-close">Cancelar</button><button type="button" class="pill primary" data-act="m-save">Guardar</button></div>
+      </form>
+    </div>`;
+}
+
+// ── Guía ────────────────────────────────────────────────────────────────
+function renderGuide(st, anim) {
+  const GD = G(), g = GD[st.id] || GD.general;
+  const sec = SECTIONS.find((s) => s.id === st.id);
+  return `<div class="dlg-back${anim ? ' anim-in' : ''}" data-act="g-close"></div>
+    <div class="dlg guide-dlg${anim ? ' anim-in' : ''}" role="dialog" aria-modal="true" aria-label="Guía">
+      <div class="dlg-head">
+        <div class="card-titles"><div class="dlg-kicker">Guía</div><div class="dlg-title">${esc(sec ? sec.label : g.label)}</div>${g.intro ? `<div class="card-sub">${esc(g.intro)}</div>` : ''}</div>
+        <button class="icon-btn" data-act="g-close" aria-label="Cerrar">${svg('close', 18)}</button>
+      </div>
+      <div class="pick-tools"><input class="roster-q" type="search" data-gq value="${esc(st.q)}" placeholder="Busca un término: DAU, retención, p90…" aria-label="Buscar en la guía"><button class="kchip${st.all ? ' on' : ''}" data-act="g-all">Todo el glosario</button></div>
+      <div class="dlg-body" data-glist>${guideBody(st)}</div>
+    </div>`;
+}
+function guideBody(st) {
+  const q = fold((st.q || '').trim());
+  const hit = (x) => !q || fold(x.t + ' ' + x.d).includes(q);
+  const block = (title, terms) => { const ts = terms.filter(hit); return ts.length ? `<div class="g-sec"><div class="g-h">${esc(title)}</div><dl class="g-terms">${ts.map((x) => `<div><dt>${esc(x.t)}</dt><dd>${esc(x.d)}</dd></div>`).join('')}</dl></div>` : ''; };
+  const GD = G(), g = GD[st.id];
+  let html = '';
+  if (!q && !st.all && g && g.how) html += `<div class="g-sec"><div class="g-h">Cómo leerla</div><ul class="g-how">${g.how.map((x) => `<li>${esc(x)}</li>`).join('')}</ul></div>`;
+  if (st.all || q) {
+    const order = [st.id].concat(SECTIONS.map((s) => s.id).filter((id) => id !== st.id)).filter((id) => GD[id]);
+    html += order.map((id) => block((SECTIONS.find((s) => s.id === id) || {}).label || id, GD[id].terms)).join('') + block(GD.general.label, GD.general.terms);
+  } else {
+    if (g) html += block('Conceptos de esta sección', g.terms);
+    html += block(GD.general.label, GD.general.terms);
+  }
+  return html || `<div class="empty">Nada coincide con «${esc(st.q)}».</div>`;
 }
 
 new App(document.getElementById('app'));

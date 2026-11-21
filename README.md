@@ -15,6 +15,8 @@ de un administrador. Sin sesión muestra datos de ejemplo con la misma forma.
 | `js/panel.js` | Datos de ejemplo, lectura de Supabase y armado de cada sección. |
 | `js/app.js` | Estado, sesión de Google y dibujo en el DOM (escritorio ≥ 900 px; debajo, app de iPhone con pestañas). |
 | `sql/altanto_analytics_v22_testers.sql` | Testers, audiencia y las vistas por persona de Hipótesis y Testers. |
+| `sql/altanto_analytics_v25_bitacora.sql` | Bitácora: hitos que anota el equipo y versiones de la app detectadas solas. |
+| `js/guide.js` | La guía del «?»: para qué sirve cada sección y qué significa cada número. |
 | `sql/altanto_analytics_v24_personas.sql` | Filtro por personas elegidas (ID o correo) en todas las secciones. |
 | `sql/altanto_analytics_v23_comercios.sql` | Cadenas de comercios, comercios por persona (Monitoreo de comercios) y el correo de entrada en el perfil. |
 | `manifest.webmanifest`, `icons/` | Ícono del panel, de la pestaña del navegador y de «Añadir a inicio». |
@@ -42,6 +44,7 @@ separado de la base de la app.
    Monitoreo de comercios y el correo de cada instalación.
 5. Corre [`sql/altanto_analytics_v24_personas.sql`](sql/altanto_analytics_v24_personas.sql) para filtrar por personas
    elegidas.
+6. Corre [`sql/altanto_analytics_v25_bitacora.sql`](sql/altanto_analytics_v25_bitacora.sql) para la Bitácora.
 
 La llave del panel es la **publicable**: sólo puede llamar `ingest_analytics`; leer exige una sesión
 que esté en `analytics_admins`. Nunca pongas aquí la `service_role`.
@@ -59,12 +62,24 @@ que esté en `analytics_admins`. Nunca pongas aquí la `service_role`.
   mueven el rango entero hacia atrás o adelante.
 - **Personas**: «Elegir personas» filtra todas las secciones por una o varias instalaciones, buscadas por
   ID, correo, alias o user persona (se puede pegar una lista). Manda sobre Testers / No testers.
-- **Menú**: las secciones van agrupadas; el menú se desliza con la rueda del mouse o las flechas, y
-  «Todas» las muestra de una vez.
+- **Menú**: en computadora, un menú lateral con las secciones agrupadas (se achica a sólo íconos con
+  «Achicar menú»; en pantallas medianas empieza achicado) y un buscador de secciones con Ctrl K. En el
+  celular, las secciones agrupadas están en «Más».
 - **Hipótesis**: cada una contra su meta, con el desglose por user persona, género, edad o iPhone, el
   detalle persona por persona, su avance día a día y un mapa de las sesiones de cada tester del día 1
   al 14. Se miden al último día del rango; quien no llegó a su día 14 cuenta como «en curso». Las
   metas y definiciones están en `HYP`, en `js/panel.js`.
+
+## Bitácora (v25) y guía
+
+- **Bitácora**: calendario y línea de tiempo de lo que hace el equipo. Los hitos se anotan desde el panel
+  (tabla `analytics_milestones`, sólo administradores) con tipo, fechas, grupo, versión, enlace y notas.
+  Solos aparecen: cada versión de la app (primer día en TestFlight o App Store, vista
+  `analytics_app_releases`) y el inicio y el día 14 de cada grupo de testers. Cada hito muestra
+  «antes → después»: DAU y % de clasificación automática la semana previa contra la semana desde ese día.
+- **Guía**: el «?» junto al título abre para qué sirve la sección, cómo leerla y qué significa cada
+  número, con buscador en todo el glosario. Los KPI muestran su definición al pasar el cursor. El texto
+  vive en `js/guide.js`.
 
 ## Monitoreo de comercios (v23)
 

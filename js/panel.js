@@ -12,6 +12,7 @@ const SECTIONS = [
   { id: 'resumen', label: 'Resumen', desc: 'Usuarios activos, instalaciones nuevas y qué trae a la gente de vuelta.' },
   { id: 'hipotesis', label: 'Hipótesis', desc: 'Cada hipótesis de la prueba contra su meta, persona por persona y día a día. Se mide al cierre del rango.' },
   { id: 'testers', label: 'Testers', desc: 'Quién es tester y quién no, su perfil, su encuesta y cómo se mueve cada uno.' },
+  { id: 'bitacora', label: 'Bitácora', desc: 'Calendario de lo que hacemos: grupos de testers, versiones, conversaciones y cambios, y cómo se movieron las métricas antes y después.', fixed: true, noAud: true },
   { id: 'activacion', label: 'Activación y retención', desc: 'Onboarding por cohorte, hitos y retención D1 / D7 / D30.' },
   { id: 'uso', label: 'Uso', desc: 'Pantallas, toques, navegación y funciones.' },
   { id: 'correo', label: 'Motor de correo', desc: 'Lectores por banco, lecturas, latencia y cuentas conectadas.' },
@@ -275,6 +276,15 @@ function makeDemo() {
   });
   const alias = new Map((D.analytics_testers || []).map((t) => [t.install_id, t.alias]));
   (D.analytics_install_profile || []).forEach((x) => { const a = alias.get(x.install_id); if (a && r() < 0.75) x.login_email = a.toLowerCase().replace('é', 'e').replace('í', 'i').replace('ó', 'o') + '.tester@gmail.com'; });
+  // v25: versiones y hitos de ejemplo, fijos (sin el azar) para no mover el resto.
+  [['1.4.0', 'testflight', -40, 6], ['1.4.1', 'testflight', -26, 9], ['1.5.0', 'testflight', -12, 14], ['1.5.0', 'appstore', -9, 30]].forEach(([version, channel, d, installs]) => push('analytics_app_releases', { version, channel, first_day: addD(today, d), last_day: today, installs }));
+  [[-20, null, 'decision', 'Definimos las hipótesis H0 a H10', 'En Miro, con metas y cómo medir cada una.'],
+    [-19, null, 'campaign', 'Invitación a testers por WhatsApp', '30 invitados, 14 aceptaron.'],
+    [-11, null, 'tester_talk', 'Llamada con 5 testers de Prueba 1', 'Piden ver los gastos por tarjeta y les cuesta encontrar Metas.'],
+    [-8, null, 'product_change', 'Directorio de comercios más grande', '+120 comercios de Lima en el directorio.'],
+    [-3, null, 'incident', 'Gmail dejó de leer BBVA por 6 horas', 'BBVA cambió el formato del correo; arreglado en el lector.'],
+    [3, 7, 'interview', 'Entrevistas finales de Prueba 1', 'H4 (pago) y H7 (recomendación).'],
+    [6, null, 'cohort_start', 'Empieza Prueba 2', '20 testers nuevos, más Despistados.']].forEach(([d, e, kind, title, notes], i) => push('analytics_milestones', { id: 'demo-' + i, day: addD(today, d), end_day: e == null ? null : addD(today, e), kind, title, notes, cohort: kind === 'cohort_start' ? 'Prueba 2' : null, version: null, link: null, created_by: 'equipo@altanto.pe' }));
   return D;
 }
 
@@ -318,6 +328,8 @@ const V21 = ['analytics_merchant_daily', 'analytics_classify_sheet_daily', 'anal
 const V22 = ['analytics_install_daily', 'analytics_install_profile', 'analytics_testers'];
 // La que agrega sql/altanto_analytics_v23_comercios.sql (Monitoreo de comercios).
 const V23 = ['analytics_merchant_person_daily'];
+// Las que agrega sql/altanto_analytics_v25_bitacora.sql (Bitácora).
+const V25 = ['analytics_milestones', 'analytics_app_releases'];
 
 // `aud` (testers / others) viaja en el encabezado x-audience, que v22 lee en
 // analytics_ev para que cada vista cuente sólo a esa audiencia.
@@ -600,11 +612,131 @@ function roster(o, all) {
   return Object.assign(base(o), { type: 'roster', people: list.map((p) => ({ id: p.id, short: p.short, alias: p.alias, email: p.email, tester: p.tester, persona: p.persona, iphone: p.iphone, channel: lab('channel', p.channel || null), first: p.first, last: p.last, days: p.days.size, cohort: p.cohort, step: p.step })), rows: [] });
 }
 
+// ── Bitácora (v25) ───────────────────────────────────────────────────────
+// Tipos de hito, con su color. `auto`: el panel los pone solos.
+const MKIND = {
+  cohort_start: { label: 'Inicio de grupo', c: 'var(--c-green)' },
+  cohort_d14: { label: 'Día 14 de un grupo', c: 'var(--c-green)' },
+  release: { label: 'Versión publicada', c: 'var(--c-blue)' },
+  tester_talk: { label: 'Conversación con testers', c: 'var(--c-orange)' },
+  interview: { label: 'Entrevista', c: 'var(--c-orange)' },
+  survey: { label: 'Encuesta', c: 'var(--c-yellow)' },
+  product_change: { label: 'Cambio en la app', c: 'var(--c-blue)' },
+  decision: { label: 'Decisión', c: 'var(--c-ink)' },
+  incident: { label: 'Incidente', c: 'var(--neg)' },
+  campaign: { label: 'Campaña o difusión', c: 'var(--c-yellow)' },
+  other: { label: 'Otro', c: 'var(--text3)' },
+};
+// Los que se anotan a mano (los otros dos los pone el panel).
+const MKIND_MANUAL = ['cohort_start', 'tester_talk', 'interview', 'survey', 'product_change', 'decision', 'incident', 'campaign', 'release', 'other'];
+const mkLab = (k) => (MKIND[k] || MKIND.other).label;
+const mkCol = (k) => (MKIND[k] || MKIND.other).c;
+
+// Todos los hitos: los anotados, las versiones (una por versión: el primer
+// día en cualquier canal) y el inicio y el día 14 de cada grupo de testers.
+function milestones(D) {
+  if (D._ms) return D._ms;
+  const out = (D.analytics_milestones || []).map((m) => ({ id: m.id, day: sd(m.day), end: sd(m.end_day), kind: m.kind || 'other', title: m.title || '', notes: m.notes || '', cohort: m.cohort || '', version: m.version || '', link: m.link || '', by: m.created_by || '', auto: false, raw: m }));
+  const rel = new Map();
+  (D.analytics_app_releases || []).forEach((r) => {
+    const o = rel.get(r.version) || rel.set(r.version, { version: r.version, day: sd(r.first_day), ch: new Map(), installs: 0 }).get(r.version);
+    if (sd(r.first_day) < o.day) o.day = sd(r.first_day);
+    o.ch.set(r.channel, sd(r.first_day));
+    o.installs = Math.max(o.installs, num(r.installs));
+  });
+  // Una versión anotada a mano reemplaza a la automática del mismo número.
+  const noted = new Set(out.filter((m) => m.kind === 'release' && m.version).map((m) => m.version));
+  rel.forEach((o) => {
+    if (noted.has(o.version)) return;
+    const chans = [...o.ch.entries()].sort((a, b) => (a[1] < b[1] ? -1 : 1)).map(([c, d]) => lab('channel', c) + (o.ch.size > 1 ? ' ' + fd(d) : '')).join(' · ');
+    out.push({ id: 'rel-' + o.version, day: o.day, kind: 'release', title: 'Versión ' + o.version, notes: chans + ' · ' + N(o.installs) + ' instalaciones la usaron', version: o.version, auto: true });
+  });
+  const groups = new Map();
+  people(D).filter((p) => p.tester && p.cohort).forEach((p) => { const g = groups.get(p.cohort) || groups.set(p.cohort, []).get(p.cohort); g.push(p); });
+  const notedC = new Set(out.filter((m) => m.kind === 'cohort_start' && m.cohort).map((m) => m.cohort));
+  groups.forEach((ps, cohort) => {
+    const start = ps.map((p) => p.start).filter(Boolean).sort()[0];
+    if (!start) return;
+    if (!notedC.has(cohort)) out.push({ id: 'cs-' + cohort, day: start, kind: 'cohort_start', title: 'Empieza ' + cohort, notes: N(ps.length) + ' testers', cohort, auto: true });
+    out.push({ id: 'c14-' + cohort, day: addD(start, 13), kind: 'cohort_d14', title: cohort + ' llega a su día 14', notes: 'Momento de la encuesta final y las entrevistas.', cohort, auto: true });
+  });
+  return (D._ms = out.sort((a, b) => (a.day < b.day ? -1 : a.day > b.day ? 1 : a.auto - b.auto)));
+}
+
+// Cómo estaban las métricas la semana antes del hito y la semana después.
+function impact(D, day) {
+  const T = limaToday();
+  const win = (a, b) => { const ds = []; for (let d = a; d <= b; d = addD(d, 1)) ds.push(d); return ds; };
+  const before = win(addD(day, -7), addD(day, -1)), after = win(day, addD(day, 6)).filter((d) => d <= T);
+  if (!after.length) return null;
+  const dam = byDay(D.analytics_daily_active || []), avm = byDay(D.analytics_auto_vs_manual_daily || []);
+  const avg = (ds, f) => { const xs = ds.map(f).filter((v) => v != null); return xs.length ? xs.reduce((a, v) => a + v, 0) / xs.length : null; };
+  const dau = (d) => (dam.has(d) ? num(dam.get(d).active_installs) : null);
+  const autoP = (ds) => { let a = 0, m = 0; ds.forEach((d) => { const x = avm.get(d); if (!x) return; a += num(x.auto_rule) + num(x.auto_keyword) + num(x.auto_voice) + num(x.auto_recurring); m += num(x.manual_from_pending); }); return a + m ? (a / (a + m)) * 100 : null; };
+  return { partial: after.length < 7, days: after.length, dau: [avg(before, dau), avg(after, dau)], auto: [autoP(before), autoP(after)] };
+}
+
+function bitacora(ctx) {
+  const D = ctx.D, T = ctx.today, cal = ctx.cal || {};
+  const all = milestones(D);
+  const kinds = new Set(cal.kinds || []);
+  const show = all.filter((m) => (!kinds.size || kinds.has(m.kind)) && (cal.auto !== false || !m.auto));
+  const month = cal.month || T.slice(0, 7);
+  const sel = cal.day || null;
+  // Cuadrícula del mes, de lunes a domingo.
+  const first = month + '-01', start = monday(first);
+  const last = addD(String(addD(first, 32)).slice(0, 7) + '-01', -1);
+  const cells = [];
+  for (let d = start; d <= last || cells.length % 7; d = addD(d, 1)) {
+    const evs = show.filter((m) => m.day === d || (m.end && m.day < d && d <= m.end));
+    cells.push({ d, n: +d.slice(8), out: d.slice(0, 7) !== month, today: d === T, sel: d === sel, future: d > T, evs: evs.map((m) => ({ id: m.id, title: m.title, c: mkCol(m.kind), auto: m.auto })) });
+  }
+  const [yy, mm] = month.split('-');
+  const dayList = sel ? show.filter((m) => m.day === sel || (m.end && m.day < sel && sel <= m.end)) : null;
+  const upcoming = show.filter((m) => m.day > T).slice(0, 6);
+  const recent = show.filter((m) => m.day <= T).slice(-6).reverse();
+  const item = (m, withImpact) => ({ id: m.id, day: m.day, end: m.end, kind: m.kind, klabel: mkLab(m.kind), c: mkCol(m.kind), title: m.title, notes: m.notes, link: m.link, by: m.by, auto: m.auto, cohort: m.cohort, version: m.version, imp: withImpact && m.day <= T ? impact(D, m.day) : null });
+  const manual = all.filter((m) => !m.auto);
+  const next = all.find((m) => m.day > T);
+  const rels = all.filter((m) => m.kind === 'release');
+  const lastRel = rels.filter((m) => m.day <= T).slice(-1)[0];
+  const counts = new Map();
+  all.forEach((m) => counts.set(m.kind, (counts.get(m.kind) || 0) + 1));
+  return {
+    kpis: [
+      kpi('Hitos anotados', N(manual.length), (() => { const past = manual.filter((m) => m.day <= T); return past.length ? 'el último: ' + fd(past[past.length - 1].day) : manual.length ? 'todos agendados a futuro' : 'todavía ninguno'; })()),
+      kpi('Versiones publicadas', N(rels.length), lastRel ? 'la última: ' + lastRel.title.replace('Versión ', '') + ' · ' + fd(lastRel.day) : '—'),
+      kpi('Grupos de prueba', N(all.filter((m) => m.kind === 'cohort_start').length), 'según Testers y lo anotado'),
+      kpi('Próximo hito', next ? fd(next.day) : '—', next ? next.title : 'nada agendado'),
+    ],
+    cards: [
+      Object.assign(base({ id: 'cal', wide: true, title: MESL[+mm - 1][0].toUpperCase() + MESL[+mm - 1].slice(1) + ' ' + yy, sub: 'Toca un día para ver sus hitos o anotar uno nuevo.' }), { type: 'calendar', month, cells, today: T }),
+      Object.assign(base({ id: 'cal-day', size: 'sm', title: sel ? 'El ' + fd(sel) : 'Próximos y recientes', sub: sel ? (dayList.length ? N(dayList.length) + (dayList.length === 1 ? ' hito' : ' hitos') : 'Nada anotado ese día.') : 'Lo que viene y lo último que pasó.' }),
+        { type: 'mlist', day: sel, groups: sel ? [{ label: '', items: dayList.map((m) => item(m, true)) }] : [{ label: 'Próximos', items: upcoming.map((m) => item(m, false)) }, { label: 'Recientes', items: recent.map((m) => item(m, false)) }] }),
+      Object.assign(base({ id: 'cal-line', size: 'lg', title: 'Línea de tiempo', sub: 'Todo, del más nuevo al más viejo. «Antes → después» compara la semana previa al hito con la semana que empieza ese día: si una versión o un cambio movió algo, se nota aquí.' }),
+        { type: 'timeline', kinds: Object.keys(MKIND).filter((k) => counts.has(k)).map((k) => ({ k, label: mkLab(k), c: mkCol(k), n: counts.get(k), on: !kinds.size || kinds.has(k) })), auto: cal.auto !== false, items: show.slice().reverse().map((m) => item(m, true)) }),
+    ],
+  };
+}
+
+async function saveMilestone(row, token) {
+  const res = await fetch(SB_URL + '/rest/v1/analytics_milestones' + (row.id ? '?on_conflict=id' : ''), { method: 'POST', headers: { apikey: SB_KEY, Authorization: 'Bearer ' + token, 'Content-Type': 'application/json', Prefer: 'resolution=merge-duplicates,return=representation' }, body: JSON.stringify([row]) });
+  if (res.status === 401) { const e = new Error('Sesión vencida'); e.code = 401; throw e; }
+  if (!res.ok) throw new Error('analytics_milestones respondió ' + res.status + (res.status === 404 ? ': corre sql/altanto_analytics_v25_bitacora.sql' : ''));
+  return (await res.json())[0];
+}
+async function deleteMilestone(id, token) {
+  const res = await fetch(SB_URL + '/rest/v1/analytics_milestones?id=eq.' + encodeURIComponent(id), { method: 'DELETE', headers: { apikey: SB_KEY, Authorization: 'Bearer ' + token } });
+  if (res.status === 401) { const e = new Error('Sesión vencida'); e.code = 401; throw e; }
+  if (!res.ok) throw new Error('analytics_milestones respondió ' + res.status);
+}
+
 function build(id, ctx) {
   const D = ctx.D, st = ctx.start, days = ctx.days, R = ctx.range, T = ctx.today;
   const perDay = (rows, f) => { const m = group(rows, (x) => String(x.day).slice(0, 10), f); return (d) => m.get(d) || 0; };
   R_END = ctx.end || null;
   R_PICK = ctx.pick && ctx.pick.size ? ctx.pick : null;
+  if (id === 'bitacora') return bitacora(ctx);
   const surveyed = (p) => ['s_matches', 's_min_after', 's_replaced', 's_pay', 's_fatal', 's_recommended'].some((k) => p.s[k] != null && p.s[k] !== '');
 
   if (id === 'hipotesis') {

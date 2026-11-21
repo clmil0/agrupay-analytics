@@ -1,0 +1,213 @@
+// Guía del panel: para qué sirve cada sección, cómo leerla y qué significa
+// cada número. Se abre con el «?» junto al título. `t` es el término tal como
+// aparece en el panel (si coincide con un KPI, el KPI muestra la definición al
+// pasar el cursor); `d`, la definición en palabras simples.
+
+const GUIDE = {
+  general: {
+    label: 'Conceptos generales',
+    terms: [
+      { t: 'Instalación', d: 'La app instalada en un iPhone. Tiene un ID aleatorio que no cambia mientras no se borre la app. Si alguien reinstala o usa otro iPhone, aparece como otra instalación. En el panel, «persona» casi siempre quiere decir instalación.' },
+      { t: 'ID', d: 'Las primeras 8 letras y números del código de una instalación (por ejemplo 3352b1be). Cada persona lo ve en la app, en Configuración › Ayuda › «Enviar estadísticas ahora».' },
+      { t: 'Correo', d: 'El correo con el que la persona entra a la app. Sólo llega desde las versiones nuevas y sólo lo ven los administradores del panel.' },
+      { t: 'Audiencia', d: 'A quién se mira: Todos, sólo Testers, sólo No testers o las personas que elijas con «Elegir personas». Las personas elegidas mandan sobre los otros tres.' },
+      { t: 'Rango', d: 'Los días que se miran: Hoy, 7, 30 o 90 días, o desde y hasta exactos. Las flechas mueven el rango entero hacia atrás o adelante. El panel carga los últimos 90 días.' },
+      { t: 'Canal', d: 'De dónde salió la app: App Store (la pública), TestFlight (la de prueba para testers) o Xcode (instalada por el equipo desde la computadora). El simulador no cuenta nunca.' },
+      { t: 'Sesión', d: 'Un rato de uso seguido. Si la app pasa más de 30 minutos en segundo plano, la vuelta es una sesión nueva.' },
+      { t: 'Evento', d: 'Cada cosa que la app avisa: abrir, ver una pantalla, clasificar un gasto, leer un correo… De ahí salen todos los números.' },
+      { t: 'Mediana (p50)', d: 'El valor del medio: la mitad está por debajo y la otra mitad por encima. Es más honesta que el promedio cuando hay casos extremos.' },
+      { t: 'p90', d: 'Nueve de cada diez casos están por debajo de este valor. Sirve para ver cómo les va a los más lentos.' },
+      { t: 'Cohorte', d: 'Un grupo de personas que empezó en la misma semana (o el mismo grupo de prueba). Se comparan para ver si la app mejora con el tiempo.' },
+      { t: '«—»', d: 'No hay datos suficientes para calcularlo en este rango, o todavía es muy pronto para medirlo.' },
+      { t: 'Hora de Lima', d: 'Todos los días y horas están en hora de Perú, aunque el teléfono esté en otro país.' },
+    ],
+  },
+  resumen: {
+    intro: 'La foto general: cuánta gente usa la app, cuánta llega nueva y qué la trae de vuelta.',
+    how: ['Mira primero DAU contra el promedio: si baja varios días seguidos, algo pasó (busca en la Bitácora qué cambió esos días).', 'Instalaciones nuevas alto con DAU plano quiere decir que la gente llega pero no se queda: revisa Activación y retención.'],
+    terms: [
+      { t: 'DAU', d: 'Usuarios activos por día (Daily Active Users): instalaciones distintas que usaron la app al menos una vez ese día. El número grande es el último día; abajo, el promedio del rango.' },
+      { t: 'WAU', d: 'Usuarios activos por semana (Weekly Active Users): instalaciones distintas que usaron la app al menos una vez en la semana, de lunes a domingo.' },
+      { t: 'MAU', d: 'Usuarios activos por mes (Monthly Active Users): instalaciones distintas que usaron la app al menos una vez en el mes.' },
+      { t: 'DAU / MAU', d: 'Qué parte de los que usan la app en el mes la usan cada día. Cerca de 20 % o más es un hábito fuerte para una app de finanzas.' },
+      { t: 'Pro activos por día', d: 'De los activos de cada día, cuántos tienen Pro (pagado o en prueba).' },
+      { t: 'Instalaciones nuevas', d: 'Instalaciones que aparecieron por primera vez. Las que ya usaban la app antes de que existiera la analítica cuentan aparte.' },
+      { t: 'Sesiones por persona', d: 'Cuántas veces al día, en promedio, entra a la app cada persona activa.' },
+      { t: 'Qué trae a la gente de vuelta', d: 'Desde dónde se abrió la app: el ícono, una notificación, el widget o Atajos, o una invitación.' },
+    ],
+  },
+  hipotesis: {
+    intro: 'Cada hipótesis de la prueba con usuarios contra su meta, persona por persona.',
+    how: ['Se mide al último día del rango: con «Hasta» en una fecha pasada ves cómo estaba ese día.', 'Toca una tarjeta para ver a cada persona y su dato. «En curso» quiere decir que todavía no llegó al día en que se decide.', 'Cambia el desglose (persona, género, edad, iPhone) para ver si algún tipo de usuario jala el resultado.'],
+    terms: [
+      { t: 'Cumple / No cumple', d: 'Si el resultado del grupo llega a la meta. En H10 la meta es quedar por debajo.' },
+      { t: 'En curso', d: 'La persona todavía no llega al día que decide la hipótesis (por ejemplo, su día 14).' },
+      { t: 'Sin datos', d: 'Falta la respuesta de la encuesta o la entrevista, o la persona no hizo lo que se mide.' },
+      { t: 'Día de la prueba', d: 'D1 es el día 1 de la persona (su «test_start» en Testers o, si no hay, su primer día en la app).' },
+      { t: 'Sesión con acción', d: 'Una sesión en la que la persona registra o revisa: crea o clasifica un movimiento, hace una regla, cambia de periodo o mira Resumen, Movimientos o un detalle 5 segundos o más. Es lo que cuenta H0.' },
+      { t: 'Acción de valor', d: 'Algo útil que no sea sólo abrir: clasificar, reglas, metas, el asistente o usar una función. Es lo que cuenta H3.' },
+      { t: 'Personas medidas', d: 'Las personas de la audiencia cuyo día 1 cae dentro de los 90 días cargados y antes del cierre del rango.' },
+      { t: 'Encuestas respondidas', d: 'Personas con al menos una respuesta de la encuesta o la entrevista guardada en Testers.' },
+    ],
+  },
+  testers: {
+    intro: 'Quién es tester, su perfil y su encuesta, y cómo se mueve cada uno.',
+    how: ['Marca a cada tester con el interruptor y toca Editar para su perfil. Busca por ID, correo o alias.', 'Llena el «Día 1 de la prueba» si alguien empezó la prueba después de instalar: así las hipótesis cuentan sus días bien.'],
+    terms: [
+      { t: 'Tester', d: 'Una instalación marcada a mano como parte de la prueba. Lo demás es «No tester».' },
+      { t: 'Testers marcados', d: 'Cuántas instalaciones están marcadas como testers.' },
+      { t: 'Testers activos', d: 'Testers que usaron la app al menos una vez en el rango.' },
+      { t: 'Testers sin perfil', d: 'Testers a los que les falta edad, género o user persona. Sin eso, los desgloses quedan en «Sin dato».' },
+      { t: 'Grupo', d: 'El grupo de prueba de la persona (por ejemplo «Prueba 1»). Sirve para filtrar y para la Bitácora.' },
+      { t: 'User persona', d: 'El tipo de usuario: Controlador, Despistado o Ahorrador.' },
+    ],
+  },
+  bitacora: {
+    intro: 'Un calendario de lo que hacemos: inicio de grupos, versiones, conversaciones con testers, encuestas, cambios y problemas. Sirve para entender por qué una métrica se movió y no olvidar qué decidimos.',
+    how: ['Toca un día para ver sus hitos y «Anotar» uno nuevo. Las fechas futuras sirven para agendar (el siguiente grupo, las entrevistas).', 'Las versiones y el inicio y día 14 de cada grupo aparecen solos; ocúltalos con «Automáticos».', 'En la línea de tiempo, «Antes → después» compara la semana anterior al hito con la semana que empieza ese día.'],
+    terms: [
+      { t: 'Hito', d: 'Algo que pasó o va a pasar y que puede mover las métricas o explica una decisión.' },
+      { t: 'Hitos anotados', d: 'Los que escribió alguien del equipo (sin contar los automáticos).' },
+      { t: 'Versión publicada', d: 'Automático: el primer día en que alguien usó esa versión por TestFlight o App Store. Si anotas una versión a mano con su número, reemplaza a la automática.' },
+      { t: 'Día 14 de un grupo', d: 'Automático: el día 14 del primer tester de cada grupo, cuando toca la encuesta final y las entrevistas.' },
+      { t: 'Antes → después', d: 'DAU promedio y % de clasificación automática en los 7 días antes del hito contra los 7 días desde ese día. Si la semana todavía no termina, dice cuántos días lleva.' },
+    ],
+  },
+  activacion: {
+    intro: 'Si la gente nueva termina de configurar la app y si vuelve después.',
+    how: ['El embudo muestra en qué paso del onboarding se queda la gente. El paso con la caída más grande es el que hay que mejorar.', 'Compara la retención de cohortes recientes con las viejas para ver si los cambios ayudaron.'],
+    terms: [
+      { t: 'Retención D1', d: 'De la gente nueva, cuánta volvió a usar la app al día siguiente de instalarla.' },
+      { t: 'Retención D7', d: 'De la gente nueva, cuánta volvió entre el día 7 y el 13 después de instalar.' },
+      { t: 'Retención D30', d: 'De la gente nueva, cuánta volvió entre el día 30 y el 59 después de instalar.' },
+      { t: 'Terminan el onboarding', d: 'Parte de las instalaciones nuevas que llegó al final de la bienvenida.' },
+      { t: 'Embudo', d: 'Cuántas personas llegan a cada paso del onboarding, de la primera pantalla a terminar.' },
+      { t: 'Hitos de activación', d: 'Primeras veces importantes (primer movimiento, primer movimiento del correo, primera clasificación, primera regla…) y en cuántas horas se llega (mediana).' },
+    ],
+  },
+  uso: {
+    intro: 'Qué pantallas y funciones se usan, y cuánto tiempo.',
+    how: ['Una función con muchos toques pero poco descubrimiento es útil pero escondida.', '«Descubrimiento de funciones» dice qué parte de la gente encontró cada función y en cuántos días.'],
+    terms: [
+      { t: 'Visitas a pantallas', d: 'Veces que se abrió una pantalla, sin contar la vuelta desde segundo plano.' },
+      { t: 'Minutos en la app', d: 'Tiempo total mirando pantallas en el rango.' },
+      { t: 'Minutos por persona', d: 'Tiempo promedio por persona activa por día.' },
+      { t: 'Miran ≥ 3 meses atrás', d: 'Parte de la gente que revisó meses de hace 3 o más meses: usa la app como historial.' },
+      { t: 'Funciones usadas', d: 'Cuántas funciones distintas se usaron en el rango.' },
+      { t: 'Toques', d: 'Toques en botones concretos, con su destino (por ejemplo «summary.card»).' },
+    ],
+  },
+  correo: {
+    intro: 'Cómo funciona la lectura automática de correos de los bancos.',
+    how: ['Si «sin monto» sube en un banco, ese banco cambió el formato de sus correos: hay que ajustar su lector.', 'Si suben los permisos revocados, la gente está desconectando el correo: revisa por qué.'],
+    terms: [
+      { t: 'Correos reconocidos', d: 'Correos de banco que la app entendió y convirtió en movimiento.' },
+      { t: 'Sin monto', d: 'Correos que parecían de un banco pero de los que no se pudo sacar el monto.' },
+      { t: 'Sin reconocer', d: 'Correos que no coincidieron con ningún lector.' },
+      { t: 'Latencia p50', d: 'Minutos que pasan, en la mediana, entre que llega el correo y aparece el movimiento en la app.' },
+      { t: 'Permisos revocados', d: 'Veces que Google o Microsoft dejaron de dar acceso al correo (la persona lo quitó o venció).' },
+      { t: 'Lector', d: 'El código que entiende los correos de un banco en particular.' },
+    ],
+  },
+  clasificacion: {
+    intro: 'Cuánto se clasifica solo y cuánto a mano, y qué tan bien acierta cada motor.',
+    how: ['Este «automático» incluye Yape, Plin y transferencias, que casi nunca se clasifican solos. Para las compras con tarjeta mira Comercios y Monitoreo de comercios.', 'Si «Pendientes del mes» crece, la gente se está rindiendo de clasificar.'],
+    terms: [
+      { t: 'Clasificado automático', d: 'De lo que terminó con categoría, cuánto llegó ya clasificado contra lo que la persona sacó a mano de Pendientes.' },
+      { t: 'Clasificados a mano', d: 'Movimientos a los que la persona les puso categoría.' },
+      { t: 'Reglas creadas', d: 'Reglas de comercio nuevas («este comercio siempre es Comida»).' },
+      { t: 'Pendientes del mes', d: 'Mediana de movimientos sin categoría del mes, por persona.' },
+      { t: 'Sugerencias aceptadas', d: 'Parte de las sugerencias de categoría que la persona aceptó.' },
+      { t: 'Deshecho tras clasificar', d: 'Parte de lo clasificado que se deshizo con el aviso «Deshacer».' },
+      { t: 'Regla de comercio', d: 'Motor que clasifica con las reglas (de fábrica o de la persona) por nombre de comercio.' },
+      { t: 'Palabra clave', d: 'Motor que clasifica buscando palabras en el nombre (por ejemplo «farmacia» → Salud).' },
+      { t: 'Directorio de comercios', d: 'Motor que clasifica con la lista de comercios conocidos de Perú.' },
+      { t: 'Precisión', d: 'De lo que clasificó un motor, cuánto no cambió después la persona.' },
+    ],
+  },
+  comercios: {
+    intro: 'Las compras con tarjeta por comercio, y aparte los pagos por Yape, Plin y transferencias.',
+    how: ['Los canales digitales (Yape, Plin…) no cuentan en el % automático: pueden ser para cualquier cosa.', '«Comercios que llegan sin categoría» son candidatos para palabras clave o reglas de fábrica.'],
+    terms: [
+      { t: 'Comercios distintos', d: 'Nombres de comercio distintos en compras con tarjeta en el rango.' },
+      { t: 'Tarjeta: se clasifican solos', d: 'De las compras con tarjeta, cuántas llegaron ya con categoría.' },
+      { t: 'Precisión automática', d: 'De lo que se clasificó solo, cuánto no se corrigió después.' },
+      { t: 'Tarjeta: a mano', d: 'Compras con tarjeta que la persona clasificó a mano.' },
+      { t: 'Canales digitales', d: 'Pagos por Yape, Plin y transferencias a personas. Se miden aparte.' },
+    ],
+  },
+  monitoreo: {
+    intro: 'Dónde la gente le corrige la categoría al motor, por cadena y persona, para saber qué mejorar del clasificador.',
+    how: ['Empieza por las alertas «Alta»: varias personas corrigen lo mismo.', 'Si el mismo cambio («Comida → Supermercado») se repite en varias cadenas, el problema es la regla o la categoría, no el comercio.', 'Si una cadena aparece partida, se une agregando un patrón en analytics_merchant_chains (Supabase).'],
+    terms: [
+      { t: 'Cadena', d: 'Un comercio con todas las formas en que lo escribe el banco («037 PVEA JOCKEY» y «048 PVEA HIGUERETA» son Plaza Vea).' },
+      { t: 'Cadenas con compras', d: 'Cadenas con al menos una compra con tarjeta en el rango.' },
+      { t: 'Se clasifican solas', d: 'De las compras con tarjeta, cuántas llegaron ya con categoría.' },
+      { t: 'Corregidas después', d: 'De lo que clasificó el motor, cuánto cambió después la persona. Es la tasa de error que se ve.' },
+      { t: 'Cadenas en alerta', d: 'Cadenas con nivel Alta o Media.' },
+      { t: 'Personas que corrigieron', d: 'Personas que le cambiaron al menos una categoría al motor en el rango.' },
+      { t: 'Alta / Media / Vigilar', d: 'Alta: 2 personas o más y 20 % o más corregidas. Media: 10 % o más. Vigilar: el resto con alguna corrección.' },
+      { t: 'Acuerdo', d: 'En candidatos para el directorio: de lo clasificado a mano, cuánto fue a la categoría más elegida.' },
+    ],
+  },
+  suscripciones: {
+    intro: 'Qué tan bien acierta el detector de suscripciones (Netflix, Spotify, el gimnasio…).',
+    how: ['Si las «sugeridas» se descartan mucho, el umbral del detector está muy bajo.'],
+    terms: [
+      { t: 'Respondidas', d: 'Detecciones que la persona confirmó o descartó.' },
+      { t: 'Confirmadas', d: 'Parte de las respondidas que la persona dijo que sí eran suscripción.' },
+      { t: 'Puntaje promedio', d: 'Qué tan seguro estaba el detector (0 a 100).' },
+      { t: 'Como cuotas', d: 'Detecciones que en realidad eran compras en cuotas.' },
+      { t: 'Detectada / Sugerida', d: '«Detectada» se muestra como suscripción; «sugerida» sólo se propone para que la persona decida.' },
+    ],
+  },
+  pro: {
+    intro: 'Qué función hace que la gente pruebe Pro y cuánto usa lo Pro quien lo tiene.',
+    how: ['«Qué función vende» dice desde qué función se abrió el paywall y cuánta gente probó: la de mayor conversión es la que más vale destacar.'],
+    terms: [
+      { t: 'Paywall', d: 'La pantalla que ofrece Pro cuando alguien toca algo que es de pago.' },
+      { t: 'Vieron el paywall', d: 'Personas que vieron esa pantalla en el rango.' },
+      { t: 'Iniciaron la prueba', d: 'Personas que empezaron la prueba gratis de Pro.' },
+      { t: 'Conversión', d: 'De los que vieron el paywall, cuántos iniciaron la prueba.' },
+      { t: 'Pro sin usar nada Pro', d: 'Personas con Pro que no usaron ninguna función Pro: riesgo de que cancelen.' },
+      { t: 'Funciones Pro por persona', d: 'Cuántas funciones Pro distintas usa, en promedio, quien tiene Pro.' },
+    ],
+  },
+  calidad: {
+    intro: 'Qué tan rápida y estable es la app.',
+    how: ['Mira p90 además de p50: si p90 sube, a los iPhone más lentos les está yendo mal.', 'Un salto de crashes justo después de una versión se ve también en la Bitácora.'],
+    terms: [
+      { t: 'Arranque p50', d: 'Tiempo, en la mediana, desde tocar el ícono hasta que aparece la primera pantalla.' },
+      { t: 'Arranque p90', d: 'Nueve de cada diez arranques son más rápidos que esto.' },
+      { t: 'Crashes', d: 'Veces que la app se cerró sola por un error.' },
+      { t: 'Cuelgues', d: 'Veces que la app se congeló un momento y no respondía a los toques.' },
+      { t: 'Errores', d: 'Errores que la persona vio o que rompieron algo, por dominio y código.' },
+      { t: 'Face ID fallido', d: 'Intentos de desbloqueo con Face ID que no funcionaron.' },
+      { t: 'MetricKit', d: 'El informe diario que manda iOS con el rendimiento de la app (memoria, batería, arranque).' },
+    ],
+  },
+  adopcion: {
+    intro: 'Qué ajustes tiene puestos la gente, según la foto diaria más reciente de cada instalación (últimos 14 días).',
+    how: ['Un ajuste útil con poca adopción quizá está escondido o mal explicado.'],
+    terms: [
+      { t: 'Foto diaria', d: 'Un resumen que la app manda una vez al día con sus ajustes (bloqueo, presupuesto, correo conectado…).' },
+      { t: 'Instalaciones con foto', d: 'Instalaciones que mandaron al menos una foto en los últimos 14 días.' },
+      { t: 'Reglas por persona', d: 'Cuántas reglas de comercio tiene cada persona, en promedio.' },
+      { t: 'Gmail conectado', d: 'Parte de las instalaciones con un Gmail conectado.' },
+      { t: 'Pro', d: 'Parte de las instalaciones con Pro.' },
+    ],
+  },
+  versiones: {
+    intro: 'Qué versiones de la app se usan en los últimos 7 días.',
+    how: ['Si mucha gente sigue en una versión vieja, un arreglo nuevo todavía no les llega.'],
+    terms: [
+      { t: 'Versión más usada', d: 'La versión con más instalaciones activas en 7 días.' },
+      { t: 'Instalaciones', d: 'Instalaciones activas en los últimos 7 días.' },
+      { t: 'En App Store', d: 'Parte de las instalaciones que usan la versión pública.' },
+    ],
+  },
+};
+
+// Definición de un término, para el título de los KPI.
+const GUIDE_TERMS = new Map();
+Object.values(GUIDE).forEach((g) => g.terms.forEach((x) => { if (!GUIDE_TERMS.has(x.t)) GUIDE_TERMS.set(x.t, x.d); }));
