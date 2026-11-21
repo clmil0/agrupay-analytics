@@ -126,19 +126,21 @@ class App {
       jobs.push(['analytics_install_daily', 'day=gte.' + addD(today, -89) + '&order=day.asc']);
       jobs.push(['analytics_install_profile', '']);
       jobs.push(['analytics_testers', '']);
+      jobs.push(['analytics_merchant_person_daily', 'day=gte.' + addD(today, -89) + '&order=day.asc']);
       const userP = fetch(SB_URL + '/auth/v1/user', { headers: { apikey: SB_KEY, Authorization: 'Bearer ' + tk } }).then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
       const failed = [];
       const res = await Promise.all(jobs.map(([v, f, a]) => fetchView(v, f, tk, a).catch((e) => { if (e.code === 401) throw e; failed.push(v); return []; })));
       const data = {};
       jobs.forEach(([v], i) => (data[v] = res[i]));
       const user = await userP;
-      const empty = jobs.every(([v], i) => V22.includes(v) || !res[i].length);
+      const empty = jobs.every(([v], i) => V22.includes(v) || V23.includes(v) || !res[i].length);
       if (failed.length === jobs.length) throw new Error('ninguna vista respondió. ¿Ya corriste agrupay_analytics_v16.sql?');
-      const miss21 = failed.filter((v) => V21.includes(v)), miss22 = failed.filter((v) => V22.includes(v)), other = failed.filter((v) => !V21.includes(v) && !V22.includes(v));
+      const miss21 = failed.filter((v) => V21.includes(v)), miss22 = failed.filter((v) => V22.includes(v)), miss23 = failed.filter((v) => V23.includes(v)), other = failed.filter((v) => !V21.includes(v) && !V22.includes(v) && !V23.includes(v));
       const parts = [];
       if (other.length) parts.push('No se pudieron leer ' + other.length + ' vistas: ' + other.slice(0, 4).join(', ') + (other.length > 4 ? '…' : '') + '.');
       if (miss21.length) parts.push('Faltan las vistas de comercios, hoja de clasificar y suscripciones (' + miss21.length + '). Corre agrupay_analytics_v21_merchants.sql en este proyecto y toca Actualizar.');
       if (miss22.length) parts.push('Faltan las vistas de testers e hipótesis: corre sql/altanto_analytics_v22_testers.sql (está en este repo) y toca Actualizar.' + (aud !== 'all' ? ' Sin ella, el filtro Testers / No testers no separa nada.' : ''));
+      if (miss23.length) parts.push('Falta la vista de Monitoreo de comercios: corre sql/altanto_analytics_v23_comercios.sql (está en este repo) y toca Actualizar.');
       let notice = parts.join(' ') || null;
       if (!notice && empty) notice = aud !== 'all' ? 'Ninguna vista trae datos para «' + lab('aud', aud) + '». ¿Ya marcaste a los testers en la sección Testers?' : await this.diagnose(tk, user);
       this.setState({ mode: 'live', data, email: user.email || 'sesión iniciada', notice, updatedAt: new Date() });
@@ -530,7 +532,7 @@ class App {
 
 const MAIN_TABS = ['resumen', 'hipotesis', 'testers', 'activacion'];
 // Las que se arman persona por persona (v22): cambian con la audiencia también con los datos de ejemplo.
-const PEOPLE_SECTIONS = ['hipotesis', 'testers'];
+const PEOPLE_SECTIONS = ['hipotesis', 'testers', 'monitoreo'];
 let rosterQ = '';
 
 function renderKpi(k, i) {
@@ -584,7 +586,8 @@ function renderBig(c) {
 function renderDetail(c, mobile, anim) {
   const isTable = c.type === 'table';
   const viz = isTable ? '' : `<div class="card dlg-viz t-${esc(c.type)}${c.tone ? ' tone-' + esc(c.tone) : ''}" data-card="${esc(c.id)}">${renderBig(c)}${renderBody(c, mobile, true)}</div>`;
-  const d = isTable ? c : c.detail;
+  // Una tabla se abre entera, o con su propio detalle (más columnas) si lo trae.
+  const d = isTable ? c.detail || c : c.detail;
   const sec = d ? `<div class="dlg-sec">${isTable ? '' : `<div class="dlg-sec-title">${esc(c.dtitle)}</div>`}<div class="card dlg-table${isTable && c.tone ? ' tone-' + esc(c.tone) : ''}">${renderBody(d, mobile, true)}</div></div>` : '';
   return `<div class="dlg-back${anim ? ' anim-in' : ''}" data-act="close"></div>
     <div class="dlg${anim ? ' anim-in' : ''}" role="dialog" aria-modal="true" aria-label="${esc(c.title)}">
@@ -700,7 +703,7 @@ function renderBody(c, mobile, full) {
   if (t === 'roster') {
     const tf = c.people.filter((p) => p.channel === 'TestFlight' && !p.tester).length;
     return `<div class="roster">
-      <div class="roster-tools"><input class="roster-q" type="search" data-q value="${esc(rosterQ)}" placeholder="Busca por el inicio del ID, alias o persona" aria-label="Buscar instalación">${tf ? `<button class="pill ghost" data-act="mark-tf">Marcar ${tf} de TestFlight</button>` : ''}</div>
+      <div class="roster-tools"><input class="roster-q" type="search" data-q value="${esc(rosterQ)}" placeholder="Busca por ID, correo, alias o persona" aria-label="Buscar instalación">${tf ? `<button class="pill ghost" data-act="mark-tf">Marcar ${tf} de TestFlight</button>` : ''}</div>
       <div data-rlist>${rosterList(c)}</div>
     </div>`;
   }
@@ -710,13 +713,13 @@ function renderBody(c, mobile, full) {
 // Las filas de la lista de instalaciones que coinciden con la búsqueda.
 function rosterList(c) {
   const q = rosterQ.trim().toLowerCase();
-  const hit = c.people.filter((p) => !q || [p.id, p.alias, p.persona, p.cohort, p.iphone].some((v) => String(v || '').toLowerCase().includes(q)));
+  const hit = c.people.filter((p) => !q || [p.id, p.alias, p.email, p.persona, p.cohort, p.iphone].some((v) => String(v || '').toLowerCase().includes(q)));
   const max = 200;
   if (!c.people.length) return `<div class="empty">Todavía no hay instalaciones. Corre sql/altanto_analytics_v22_testers.sql y toca Actualizar.</div>`;
   if (!hit.length) return `<div class="empty">Ninguna instalación coincide con «${esc(rosterQ)}»</div>`;
   return `<div class="rr-list">${hit.slice(0, max).map((p) => `<div class="rr${p.tester ? ' on' : ''}">
       <button class="chk${p.tester ? ' on' : ''}" data-act="t-toggle" data-id="${esc(p.id)}" role="switch" aria-checked="${p.tester}" aria-label="Tester ${esc(p.short)}"><i></i></button>
-      <div class="rr-main"><div class="rr-title"><code>${esc(p.short)}</code>${p.alias ? `<b>${esc(p.alias)}</b>` : `<span class="rr-muted">${p.tester ? 'Sin alias' : 'No tester'}</span>`}</div><div class="rr-sub">${esc([p.persona, p.iphone, p.channel, p.cohort].filter(Boolean).join(' · ') || '—')}</div></div>
+      <div class="rr-main"><div class="rr-title"><code>${esc(p.short)}</code>${p.alias ? `<b>${esc(p.alias)}</b>` : `<span class="rr-muted">${p.tester ? 'Sin alias' : 'No tester'}</span>`}</div><div class="rr-sub">${esc([p.email, p.persona, p.iphone, p.channel, p.cohort].filter(Boolean).join(' · ') || '—')}</div></div>
       <div class="rr-days">${esc(fd(p.first))} → ${esc(fd(p.last))}<small>${esc(N(p.days))} días con datos</small></div>
       <button class="pill ghost small" data-act="t-edit" data-id="${esc(p.id)}">Editar</button>
     </div>`).join('')}</div>${hit.length > max ? `<div class="rr-more">Mostrando ${max} de ${hit.length}. Busca por el inicio del ID para encontrar a alguien.</div>` : ''}`;

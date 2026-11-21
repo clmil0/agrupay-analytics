@@ -17,6 +17,7 @@ const SECTIONS = [
   { id: 'correo', label: 'Motor de correo', desc: 'Lectores por banco, lecturas, latencia y cuentas conectadas.' },
   { id: 'clasificacion', label: 'Clasificación', desc: 'Automático contra manual, precisión de cada motor, sugerencias y Pendientes.' },
   { id: 'comercios', label: 'Comercios', desc: 'Compras con tarjeta: cuáles se clasifican solas, cuáles se corrigen y cuáles llegan sin categoría. Aparte, Yape, Plin y transferencias.' },
+  { id: 'monitoreo', label: 'Monitoreo de comercios', desc: 'Dónde la gente le corrige la categoría al motor, por cadena y persona, y qué comercios conviene sumar al directorio.' },
   { id: 'suscripciones', label: 'Suscripciones', desc: 'Cuánto acierta el detector de suscripciones en los últimos 30 días.', fixed: true },
   { id: 'pro', label: 'Pro y paywall', desc: 'Qué función vende y cuánto se usa lo Pro.' },
   { id: 'calidad', label: 'Calidad', desc: 'Arranque, crashes, cuelgues, errores y Face ID.' },
@@ -28,7 +29,7 @@ const LBL = {
   src: { icon: 'Ícono', notification: 'Notificación', link: 'Widget / Atajos', invite: 'Invitación' },
   step: { slide_1: 'Pantalla 1', slide_2: 'Pantalla 2', slide_3: 'Pantalla 3', login: 'Inicio de sesión', connect_tapped: 'Tocó conectar', connected: 'Conectó el correo', restore_offered: 'Se ofreció restaurar', history: 'Historial', reading: 'Leyendo', no_account: 'Sin cuenta', finished: 'Terminó' },
   ms: { first_movement: 'Primer movimiento', first_email_movement: 'Primer movimiento del correo', first_classification: 'Primera clasificación', first_rule: 'Primera regla', first_friend: 'Primer amigo' },
-  engine: { rule: 'Regla de comercio', keyword: 'Palabra clave', voice: 'Voz', recurring: 'Recurrente', usuario: 'Usuario' },
+  engine: { rule: 'Regla de comercio', keyword: 'Palabra clave', directory: 'Directorio de comercios', voice: 'Voz', recurring: 'Recurrente', usuario: 'Usuario' },
   sugg: { rule: 'Regla', root: 'Raíz', catalog: 'Catálogo' },
   pro: { history: 'Historial', ai: 'Asistente IA', alerts: 'Alertas', cloud: 'Nube', sync: 'Sincronización', themes: 'Temas', profile: 'Perfil', general: 'General' },
   acct: { account_connect_started: 'Abrió la ventana', account_connected: 'Conectó', account_connect_failed: 'Falló', account_disconnected: 'Desconectó' },
@@ -233,6 +234,45 @@ function makeDemo() {
     const done = first <= addD(today, -13) && r() < 0.9, before = ri(30, 90);
     push('analytics_testers', { install_id: id, alias: NAMES[k], is_tester: true, cohort: 'Prueba 1', test_start: first, age: ri(19, 48), gender: r() < 0.5 ? 'f' : 'm', iphone: null, persona: PERS[k % 3], notes: null, s_min_before: before, s_min_after: done ? Math.round(before * (0.25 + r() * 0.6)) : null, s_matches: done ? r() < 0.88 : null, s_tool_before: pick(['Excel', 'Cuaderno', 'App del banco', 'Nada']), s_tool_after: done ? pick(['AlTanto', 'AlTanto', 'AlTanto y Excel', 'Excel']) : null, s_replaced: done ? r() < 0.7 : null, s_pay: done ? pick(['si', 'tal_vez', 'no', 'no']) : null, s_pay_amount: done ? pick([0, 5, 10, 15]) : null, s_fatal: done ? pick(['muy', 'algo', 'algo', 'nada']) : null, s_recommended: done ? r() < 0.45 : null });
   }
+  // v23: comercios por persona (sale de los consumos con tarjeta de cada día) y
+  // el correo de entrada de la mayoría de los testers. Va al final para no
+  // cambiar el resto de los datos de ejemplo.
+  const MCAT = [
+    // [cadena, nombres del banco, categoría, motor (null = llega sin categoría), cuánto se corrige, a dónde la mueven, peso]
+    ['UBER', ['UBER *TRIP', 'UBER RIDES', 'PAG*UBER'], 'Transporte', 'rule', 0.02, 'Viajes', 5],
+    ['DIDI', ['PAG*DIDI DRIVE', 'PYU*DIDI', 'DIDI FOOD'], 'Transporte', 'rule', 0.18, 'Comida', 4],
+    ['MASS', ['748 MASS ORDONEZ1 SB', '512 MASS SURCO'], 'Supermercado', 'directory', 0.04, 'Casa', 3],
+    ['TAMBO', ['TAMBO PRINCIPAL', 'TAMBO SAN-JUAN', 'TAMBO LARCO'], 'Comida', 'keyword', 0.32, 'Supermercado', 3],
+    ['PLAZA VEA', ['037 PVEA JOCKEY', '048 PVEA HIGUERETA', '198 PVEA CHORRILLOS'], 'Supermercado', 'keyword', 0.03, 'Casa', 2],
+    ['APPLE', ['APPLE.COM/BILL', 'APPLE: ICLOUD+'], 'Suscripciones', 'directory', 0.02, 'Servicios', 1.5],
+    ['PRIMAX', ['PRIMAX JAVIER PRADO', 'PRIMAX AREQUIPA'], 'Transporte', 'keyword', 0.26, 'Auto', 1.5],
+    ['STARBUCKS', ['STARBUCKS LARCOMAR', 'STARBUCKS BENAVIDES'], 'Comida', 'keyword', 0.2, 'Café', 1.2],
+    ['RAPPI', ['RAPPI SAC', 'RAPPI PRIME'], 'Comida', 'rule', 0.04, 'Delivery', 1.5],
+    ['MOVISTAR', ['MOVISTAR MOVIL', 'MOVISTAR FIJO'], 'Servicios', 'directory', 0.12, 'personalizada', 1],
+    ['PEDIDOSYA', ['DLC*PEDIDOSYA FOOD', 'PEDIDOSYA MARKET'], 'Comida', null, 0, null, 2],
+    ['PROBOCA', ['OPENPAY*PROBOCA', 'PROBOCA CHORRILLOS'], 'Comida', null, 0, null, 1.2],
+    ['INKAFARMA', ['INKAFARMA 0231', 'INKAFARMA LA MOLINA'], 'Salud', null, 0, null, 1],
+    ['VENDOMATICA', ['VENDOMATICA', 'VENDOMATICA SAC'], 'Comida', null, 0, null, 1.2],
+    ['SODIMAC', ['SODIMAC SURCO'], 'Casa', null, 0, null, 0.6],
+  ];
+  const MW = MCAT.reduce((a, x) => a + x[6], 0);
+  const pickM = () => { let t = r() * MW; for (const x of MCAT) { t -= x[6]; if (t <= 0) return x; } return MCAT[0]; };
+  const mrow = (o) => push('analytics_merchant_person_daily', Object.assign({ engine: null, from_category: 'sin_clasificar', movements: 1, rules: 0 }, o));
+  (D.analytics_install_daily || []).forEach((x) => {
+    for (let j = 0; j < num(x.card_movements); j++) {
+      const [chain, names, cat, eng, wrong, to] = pickM();
+      const merchant = pick(names), base = { install_id: x.install_id, day: x.day, merchant, chain };
+      if (eng && r() < 0.85) {
+        mrow(Object.assign({ source: 'auto', engine: eng, to_category: cat }, base));
+        if (r() < wrong) mrow(Object.assign({ source: 'reclassified', engine: eng, from_category: cat, to_category: to, day: r() < 0.7 ? x.day : addD(x.day, 1) }, base));
+      } else {
+        mrow(Object.assign({ source: 'arrived', to_category: 'sin_clasificar' }, base));
+        if (r() < 0.6) mrow(Object.assign({ source: 'manual', to_category: r() < 0.8 ? cat : 'personalizada', rules: r() < 0.08 ? 1 : 0 }, base));
+      }
+    }
+  });
+  const alias = new Map((D.analytics_testers || []).map((t) => [t.install_id, t.alias]));
+  (D.analytics_install_profile || []).forEach((x) => { const a = alias.get(x.install_id); if (a && r() < 0.75) x.login_email = a.toLowerCase().replace('é', 'e').replace('í', 'i').replace('ó', 'o') + '.tester@gmail.com'; });
   return D;
 }
 
@@ -274,6 +314,8 @@ const V21 = ['analytics_merchant_daily', 'analytics_classify_sheet_daily', 'anal
 // Las de sql/altanto_analytics_v22_testers.sql (en este repo). Se piden sin audiencia:
 // el panel separa testers del resto con analytics_testers.
 const V22 = ['analytics_install_daily', 'analytics_install_profile', 'analytics_testers'];
+// La que agrega sql/altanto_analytics_v23_comercios.sql (Monitoreo de comercios).
+const V23 = ['analytics_merchant_person_daily'];
 
 // `aud` (testers / others) viaja en el encabezado x-audience, que v22 lee en
 // analytics_ev para que cada vista cuente sólo a esa audiencia.
@@ -456,7 +498,7 @@ function people(D) {
     const days = dm.get(x.install_id) || new Map();
     const ds = [...days.keys()].sort();
     const first = sd(x.first_day) || ds[0] || null;
-    return { id: x.install_id, short: String(x.install_id).slice(0, 8), alias: t.alias || '', tester: !!t.is_tester, saved: !!t.install_id, s: t, cohort: t.cohort || '', start: sd(t.test_start) || first, first, last: ds[ds.length - 1] || sd(x.last_day), channel: x.channel || '', device: x.device || '', iphone: t.iphone || devName(x.device), persona: t.persona || '', gender: t.gender || '', age: t.age, step: x.onboarding_last_step || null, days };
+    return { id: x.install_id, short: String(x.install_id).slice(0, 8), alias: t.alias || '', email: x.login_email || '', tester: !!t.is_tester, saved: !!t.install_id, s: t, cohort: t.cohort || '', start: sd(t.test_start) || first, first, last: ds[ds.length - 1] || sd(x.last_day), channel: x.channel || '', device: x.device || '', iphone: t.iphone || devName(x.device), persona: t.persona || '', gender: t.gender || '', age: t.age, step: x.onboarding_last_step || null, days };
   };
   const out = (D.analytics_install_profile || []).map(make);
   // Marcados como testers pero sin perfil (todavía no mandan nada, o sólo del simulador).
@@ -551,7 +593,7 @@ function hypCard(h, pop, asOf, ctx) {
 // Lista de instalaciones para marcar testers. La búsqueda y la edición viven en app.js.
 function roster(o, all) {
   const list = all.slice().sort((a, b) => (b.tester - a.tester) || String(b.last || '').localeCompare(String(a.last || '')));
-  return Object.assign(base(o), { type: 'roster', people: list.map((p) => ({ id: p.id, short: p.short, alias: p.alias, tester: p.tester, persona: p.persona, iphone: p.iphone, channel: lab('channel', p.channel || null), first: p.first, last: p.last, days: p.days.size, cohort: p.cohort, step: p.step })), rows: [] });
+  return Object.assign(base(o), { type: 'roster', people: list.map((p) => ({ id: p.id, short: p.short, alias: p.alias, email: p.email, tester: p.tester, persona: p.persona, iphone: p.iphone, channel: lab('channel', p.channel || null), first: p.first, last: p.last, days: p.days.size, cohort: p.cohort, step: p.step })), rows: [] });
 }
 
 function build(id, ctx) {
@@ -810,6 +852,107 @@ function build(id, ctx) {
         bars(ctx, { id: 'undo', area: true, title: 'Clasificaciones deshechas', sub: 'Parte de lo clasificado desde la hoja, la ráfaga o la selección que se deshizo con el aviso.', big: P(pct(undone, quick)), bigSub: 'deshecho en el rango', keys: days, fmt: P, tipFn: (d) => { const x = udm.get(d); return x ? fd(d) + ' · ' + P(x.pct_undone) + ' · ' + N(x.movements_undone) + ' de ' + N(x.movements_classified) : fd(d) + ' · sin datos'; }, series: [{ label: '% deshecho', c: COL.a, get: (d) => num(udm.get(d) && udm.get(d).pct_undone) }] }),
         bars(ctx, { id: 'backfill', title: 'Reglas puestas de golpe', sub: 'Movimientos sin categoría que se clasificaron solos al aplicar las reglas (p. ej. tras restaurar).', big: N(sum(bf, 'movements')), bigSub: 'movimientos', keys: days, tipFn: (d) => { const x = bfm.get(d); return x ? fd(d) + ' · ' + N(x.movements) + ' movimientos en ' + N(x.runs) + (num(x.runs) === 1 ? ' vez' : ' veces') : fd(d) + ' · nada'; }, series: [{ label: 'Movimientos', c: COL.green, get: (d) => num(bfm.get(d) && bfm.get(d).movements) }] }),
       ],
+    };
+  }
+
+  if (id === 'monitoreo') {
+    // Compras con tarjeta por persona y cadena (v23). Lo que importa: dónde la
+    // gente le corrige la categoría al motor y qué comercios llegan sin ella.
+    const PM = new Map(people(D).map((p) => [p.id, p]));
+    const inA = (x) => { const p = PM.get(x.install_id); return p ? inAud(p, ctx.aud, ctx.cohort) : ctx.aud !== 'testers' && !ctx.cohort; };
+    const rows = inR(D.analytics_merchant_person_daily, st).filter(inA);
+    const who = (iid) => { const p = PM.get(iid); return p ? p.alias || p.email || p.short : String(iid).slice(0, 8); };
+    const mail = (iid) => { const p = PM.get(iid); return (p && p.email) || '—'; };
+    const set = (m, k) => m.get(k) || m.set(k, new Set()).get(k);
+    const bump = (m, k, v, iid) => { const o = m.get(k) || m.set(k, { m: 0, ppl: new Set() }).get(k); o.m += v; if (iid) o.ppl.add(iid); return o; };
+    const CH = new Map(), ENG = new Map(), PAIRS = new Map();
+    const autoDay = new Map(), corrDay = new Map(), corrP = new Set(), cardP = new Set();
+    rows.forEach((x) => {
+      const k = x.chain || x.merchant || '—', m = num(x.movements), d = String(x.day).slice(0, 10), iid = x.install_id;
+      const c = CH.get(k) || CH.set(k, { chain: k, arrived: 0, auto: 0, none: 0, manual: 0, recl: 0, corr: 0, eng: new Map(), names: new Map(), ppl: new Set(), corrP: new Set(), manP: new Set(), pairs: new Map(), manTo: new Map(), byP: new Map(), last: '' }).get(k);
+      c.names.set(x.merchant, (c.names.get(x.merchant) || 0) + m);
+      c.ppl.add(iid); cardP.add(iid);
+      if (d > c.last) c.last = d;
+      const pp = c.byP.get(iid) || c.byP.set(iid, { arrived: 0, auto: 0, corr: 0, manual: 0, moves: new Map(), last: '' }).get(iid);
+      if (d > pp.last) pp.last = d;
+      if (x.source === 'auto' || x.source === 'arrived') { c.arrived += m; pp.arrived += m; }
+      if (x.source === 'auto') {
+        c.auto += m; pp.auto += m; c.eng.set(x.engine, (c.eng.get(x.engine) || 0) + m);
+        autoDay.set(d, (autoDay.get(d) || 0) + m);
+        const e = ENG.get(x.engine) || ENG.set(x.engine, { auto: 0, corr: 0, chains: new Set(), ppl: new Set() }).get(x.engine); e.auto += m; e.chains.add(k);
+      }
+      if (x.source === 'arrived') c.none += m;
+      if (x.source === 'manual') { c.manual += m; pp.manual += m; c.manP.add(iid); bump(c.manTo, x.to_category, m, iid); }
+      if (x.source === 'reclassified') {
+        c.recl += m;
+        if (x.engine) {
+          c.corr += m; pp.corr += m; c.corrP.add(iid); corrP.add(iid);
+          corrDay.set(d, (corrDay.get(d) || 0) + m);
+          const mv = clab(x.from_category) + ' → ' + clab(x.to_category);
+          bump(c.pairs, mv, m, iid); pp.moves.set(mv, (pp.moves.get(mv) || 0) + m);
+          const e = ENG.get(x.engine) || ENG.set(x.engine, { auto: 0, corr: 0, chains: new Set(), ppl: new Set() }).get(x.engine); e.corr += m; e.ppl.add(iid);
+          const pk = [x.engine, x.from_category, x.to_category].join('|');
+          const o = bump(PAIRS, pk, m, iid); (o.chains || (o.chains = new Map())).set(k, (o.chains.get(k) || 0) + m);
+        }
+      }
+    });
+    const chains = [...CH.values()];
+    const autoT = sum(chains, 'auto'), arrT = sum(chains, 'arrived'), corrT = sum(chains, 'corr');
+    const rateOf = (c) => (c.auto ? (c.corr / c.auto) * 100 : null);
+    const topOf = (m) => [...m.entries()].sort((a, b) => (b[1].m || b[1]) - (a[1].m || a[1]))[0];
+    const engOf = (c) => { const t = [...c.eng.entries()].sort((a, b) => b[1] - a[1])[0]; return t ? lab('engine', t[0]) : 'Sin motor'; };
+    // Alta: dos o más personas y 20 % o más. Media: 10 % o más. Vigilar: el resto con correcciones.
+    const LEVEL = { alta: ['Alta', 'var(--neg)', 0], media: ['Media', 'var(--warn)', 1], vigilar: ['Vigilar', 'var(--text2)', 2] };
+    const levelOf = (c) => { const r = rateOf(c), np = c.corrP.size; if (np >= 2 && (r == null || r >= 20)) return LEVEL.alta; if (r == null || r >= 10) return LEVEL.media; return LEVEL.vigilar; };
+    const alerts = chains.filter((c) => c.corr > 0).sort((a, b) => levelOf(a)[2] - levelOf(b)[2] || b.corr - a.corr || b.corrP.size - a.corrP.size);
+    const serious = alerts.filter((c) => levelOf(c) !== LEVEL.vigilar).length;
+    const pairTxt = (c) => { const t = topOf(c.pairs); return t ? t[0] : '—'; };
+    const alertRow = (c) => { const lv = levelOf(c); return [{ v: c.chain, fw: 600 }, { v: lv[0], color: lv[1], fw: 600 }, { v: engOf(c) }, nc(c.arrived), N(c.auto), { v: N(c.corr), color: 'var(--warn)', fw: 600 }, pctCell(rateOf(c), 10), N(c.corrP.size), { v: pairTxt(c) }]; };
+    const alertCols = [{ label: 'Cadena', align: 'left', w: 'minmax(120px,1.4fr)' }, { label: 'Nivel', align: 'left', w: 'minmax(64px,.7fr)' }, { label: 'Motor', align: 'left', w: 'minmax(110px,1.2fr)' }, { label: 'Llegaron', bar: true }, { label: 'Solas' }, { label: 'Corregidas' }, { label: '% corregidas', heat: true }, { label: 'Personas' }, { label: 'La mueven', align: 'left', w: 'minmax(170px,1.8fr)' }];
+    const engines = [...ENG.entries()].filter(([e]) => e).sort((a, b) => b[1].auto - a[1].auto);
+    const pairs = [...PAIRS.entries()].sort((a, b) => b[1].m - a[1].m);
+    // Candidatos para el directorio: llegan sin categoría y la gente les pone casi siempre la misma.
+    const cands = chains.filter((c) => c.manual >= 2).map((c) => { const t = topOf(c.manTo); return { c, cat: t ? t[0] : null, m: t ? t[1].m : 0, ppl: t ? t[1].ppl.size : 0 }; })
+      .sort((a, b) => b.c.manP.size - a.c.manP.size || b.c.manual - a.c.manual);
+    const personTable = (c, show, wide) => {
+      const list = [...c.byP.entries()].sort((a, b) => b[1].corr - a[1].corr || b[1].arrived - a[1].arrived);
+      const cols = [{ label: 'Persona', align: 'left', w: 'minmax(110px,1.4fr)' }].concat(wide ? [{ label: 'Correo', align: 'left', w: 'minmax(170px,1.8fr)' }, { label: 'Tester', align: 'left', w: 'minmax(54px,.6fr)' }] : [])
+        .concat([{ label: 'Llegaron', bar: true }, { label: 'Solas' }, { label: 'Corrigió' }, { label: 'Cómo la movió', align: 'left', w: 'minmax(160px,1.8fr)' }]).concat(wide ? [{ label: 'Último día', align: 'left', w: 'minmax(80px,.9fr)' }] : []);
+      return { cols, rows: list.map(([iid, p]) => { const mv = [...p.moves.entries()].sort((a, b) => b[1] - a[1]).map(([k, v]) => k + (v > 1 ? ' ×' + v : '')).join(' · ') || '—';
+        const pr = PM.get(iid);
+        return [{ v: who(iid), fw: 500 }].concat(wide ? [{ v: mail(iid), color: 'var(--text2)' }, pr && pr.tester ? 'Sí' : 'No'] : []).concat([nc(p.arrived), N(p.auto), p.corr ? { v: N(p.corr), color: 'var(--warn)', fw: 600 } : '0', { v: mv }]).concat(wide ? [fd(p.last)] : []); }), show };
+    };
+    const chainCards = alerts.slice(0, 6).map((c, i) => {
+      const lv = levelOf(c), t = personTable(c, 5, false), d = personTable(c, Infinity, true);
+      const names = [...c.names.entries()].sort((a, b) => b[1] - a[1]).map(([n]) => n);
+      return table({ id: 'mon-c-' + i, size: 'md', title: c.chain, meta: lv[0], sub: N(c.corr) + ' de ' + N(c.auto) + ' corregidas (' + (rateOf(c) == null ? '—' : P(r1(rateOf(c)))) + ') · ' + engOf(c) + ' · nombres: ' + names.slice(0, 3).join(', ') + (names.length > 3 ? ' y ' + (names.length - 3) + ' más' : ''),
+        cols: t.cols, rows: t.rows, show: 5, minW: '520px', dtitle: 'Persona por persona', detail: table({ id: 'mon-c-' + i + '-d', show: Infinity, minW: '860px', cols: d.cols, rows: d.rows }) });
+    });
+    const nameRows = chains.filter((c) => c.arrived > 0).sort((a, b) => b.names.size - a.names.size || b.arrived - a.arrived)
+      .map((c) => { const ns = [...c.names.keys()]; return [{ v: c.chain, fw: 500 }, nc(ns.length), { v: ns.slice(0, 4).join(' · ') + (ns.length > 4 ? ' …' : ''), color: 'var(--text2)' }, N(c.arrived), N(c.ppl.size)]; });
+    const nameCols = [{ label: 'Cadena', align: 'left', w: 'minmax(120px,1.3fr)' }, { label: 'Nombres', bar: true, w: 'minmax(70px,.7fr)' }, { label: 'Cómo los escribe el banco', align: 'left', w: 'minmax(240px,3fr)' }, { label: 'Llegaron' }, { label: 'Personas' }];
+    return {
+      kpis: [
+        kpi('Cadenas con compras', N(chains.filter((c) => c.arrived > 0).length), N(new Set(rows.map((x) => x.merchant)).size) + ' nombres distintos del banco'),
+        kpi('Se clasifican solas', P(pct(autoT, arrT)), N(autoT) + ' de ' + N(arrT) + ' compras con tarjeta'),
+        kpi('Corregidas después', autoT ? P(r1((corrT / autoT) * 100)) : '—', N(corrT) + ' de lo que puso el motor', autoT && corrT / autoT >= 0.1 ? 'var(--warn)' : null),
+        kpi('Cadenas en alerta', N(serious), N(alerts.length - serious) + ' más para vigilar', serious ? 'var(--warn)' : null),
+        kpi('Personas que corrigieron', N(corrP.size), 'de ' + N(cardP.size) + ' con compras con tarjeta'),
+      ],
+      cards: [
+        table({ id: 'mon-alerts', wide: true, show: 8, minW: '900px', title: 'Alertas: dónde la gente corrige al motor', sub: 'Cadenas a las que la gente les cambió la categoría que puso el motor. Alta: 2 personas o más y 20 % o más corregidas. Media: 10 % o más. Vigilar: el resto.', cols: alertCols, rows: alerts.map(alertRow),
+          dtitle: 'Todas las cadenas corregidas', detail: table({ id: 'mon-alerts-d', show: Infinity, minW: '900px', cols: alertCols, rows: alerts.map(alertRow) }) }),
+        bars(ctx, { id: 'mon-days', size: 'lg', title: 'Lo que clasificó el motor y lo que se corrigió', sub: 'Compras con tarjeta que llegaron con categoría y, el día en que pasó, las que la gente corrigió.', keys: days, series: [{ label: 'Clasificó el motor', c: COL.blue, get: (d) => autoDay.get(d) || 0 }, { label: 'Corregidas', c: COL.a, get: (d) => corrDay.get(d) || 0 }] }),
+        table({ id: 'mon-engines', size: 'sm', title: 'Por motor', sub: 'Cuánto clasifica cada motor y cuánto se le corrige.', cols: [{ label: 'Motor', align: 'left', w: 'minmax(110px,1.5fr)' }, { label: 'Clasificó', bar: true }, { label: 'Corregidas' }, { label: '%', heat: true }, { label: 'Cadenas' }],
+          rows: engines.map(([e, x]) => [{ v: lab('engine', e), fw: 500 }, nc(x.auto), N(x.corr), pctCell(x.auto ? (x.corr / x.auto) * 100 : null, 10), N(x.chains.size)]) }),
+      ].concat(chainCards).concat([
+        table({ id: 'mon-pairs', wide: true, show: 8, minW: '760px', title: 'De qué categoría a cuál', sub: 'Las correcciones agrupadas por motor y cambio. Si un mismo cambio se repite en varias cadenas, el problema es del motor o de la categoría, no del comercio.', cols: [{ label: 'Motor', align: 'left', w: 'minmax(110px,1.1fr)' }, { label: 'De → a', align: 'left', w: 'minmax(170px,1.6fr)' }, { label: 'Movs.', bar: true }, { label: 'Personas' }, { label: 'Cadenas', align: 'left', w: 'minmax(200px,2.2fr)' }],
+          rows: pairs.map(([k, x]) => { const [e, f, t] = k.split('|'); return [{ v: lab('engine', e), fw: 500 }, { v: clab(f) + ' → ' + clab(t) }, nc(x.m), N(x.ppl.size), { v: [...x.chains.entries()].sort((a, b) => b[1] - a[1]).map(([c]) => c).slice(0, 4).join(', '), color: 'var(--text2)' }]; }) }),
+        table({ id: 'mon-dir', wide: true, show: 8, minW: '760px', tone: 'dark', title: 'Candidatos para el directorio', sub: 'Cadenas que llegan sin categoría y que la gente clasifica a mano. Con mucho acuerdo y varias personas, conviene sumarlas al directorio o a una regla de fábrica.', cols: [{ label: 'Cadena', align: 'left', w: 'minmax(120px,1.4fr)' }, { label: 'Sin categoría', bar: true }, { label: 'A mano' }, { label: 'Categoría que eligen', align: 'left', w: 'minmax(130px,1.4fr)' }, { label: 'Acuerdo', heat: true }, { label: 'Personas' }],
+          rows: cands.map((x) => [{ v: x.c.chain, fw: 500 }, nc(x.c.none), N(x.c.manual), { v: clab(x.cat) + (x.cat === 'personalizada' ? ' (propia)' : '') }, pctCell(x.c.manual ? (x.m / x.c.manual) * 100 : null), N(x.c.manP.size)]) }),
+        table({ id: 'mon-names', wide: true, show: 8, minW: '760px', title: 'Cadenas y cómo las escribe el banco', sub: 'Los nombres que se juntaron en cada cadena. Si una cadena aparece partida o mal unida, se corrige en la tabla analytics_merchant_chains de Supabase.', cols: nameCols, rows: nameRows,
+          dtitle: 'Todas las cadenas', detail: table({ id: 'mon-names-d', show: Infinity, minW: '760px', cols: nameCols, rows: nameRows }) }),
+      ]),
     };
   }
 

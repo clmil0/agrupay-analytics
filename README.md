@@ -15,6 +15,7 @@ de un administrador. Sin sesión muestra datos de ejemplo con la misma forma.
 | `js/panel.js` | Datos de ejemplo, lectura de Supabase y armado de cada sección. |
 | `js/app.js` | Estado, sesión de Google y dibujo en el DOM (escritorio ≥ 900 px; debajo, app de iPhone con pestañas). |
 | `sql/altanto_analytics_v22_testers.sql` | Testers, audiencia y las vistas por persona de Hipótesis y Testers. |
+| `sql/altanto_analytics_v23_comercios.sql` | Cadenas de comercios, comercios por persona (Monitoreo de comercios) y el correo de entrada en el perfil. |
 | `manifest.webmanifest`, `icons/` | Ícono del panel, de la pestaña del navegador y de «Añadir a inicio». |
 
 Sin dependencias ni compilación: GitHub Pages sirve la rama `main` tal cual.
@@ -36,6 +37,8 @@ separado de la base de la app.
 
 3. Corre [`sql/altanto_analytics_v22_testers.sql`](sql/altanto_analytics_v22_testers.sql) (después de v16 y v21) para
    Hipótesis, Testers y el filtro de audiencia.
+4. Corre [`sql/altanto_analytics_v23_comercios.sql`](sql/altanto_analytics_v23_comercios.sql) (después de v22) para
+   Monitoreo de comercios y el correo de cada instalación.
 
 La llave del panel es la **publicable**: sólo puede llamar `ingest_analytics`; leer exige una sesión
 que esté en `analytics_admins`. Nunca pongas aquí la `service_role`.
@@ -54,6 +57,20 @@ que esté en `analytics_admins`. Nunca pongas aquí la `service_role`.
   detalle persona por persona, su avance día a día y un mapa de las sesiones de cada tester del día 1
   al 14. Se miden al último día del rango; quien no llegó a su día 14 cuenta como «en curso». Las
   metas y definiciones están en `HYP`, en `js/panel.js`.
+
+## Monitoreo de comercios (v23)
+
+- **Cadenas**: el banco escribe el mismo comercio de muchas formas («037 PVEA JOCKEY», «048 PVEA
+  HIGUERETA»…). `analytics_merchant_chain` quita el número de tienda y el procesador («PAG*», «PYU*»…) y
+  busca la cadena en la tabla `analytics_merchant_chains` (patrón → cadena). Si una cadena sale partida o
+  mal unida, agrega o corrige un patrón ahí: el panel lo toma al actualizar.
+- **Alertas**: cadenas a las que la gente les corrige la categoría que puso el motor. Alta: 2 personas o
+  más y 20 % o más corregidas; Media: 10 % o más; Vigilar: el resto. Cada una abre el detalle persona por
+  persona, con correo, si es tester y cómo la movió.
+- **Candidatos para el directorio**: cadenas que llegan sin categoría y que la gente clasifica casi
+  siempre igual.
+- Sin pagos a personas (Yape, Plin, transferencias) ni retiros. El correo de entrada (`login_email`) sólo
+  llega desde las versiones nuevas de la app y sólo lo ven los administradores.
 
 ## Local
 
