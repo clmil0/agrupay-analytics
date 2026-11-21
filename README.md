@@ -15,6 +15,7 @@ de un administrador. Sin sesión muestra datos de ejemplo con la misma forma.
 | `js/panel.js` | Datos de ejemplo, lectura de Supabase y armado de cada sección. |
 | `js/app.js` | Estado, sesión de Google y dibujo en el DOM (escritorio ≥ 900 px; debajo, app de iPhone con pestañas). |
 | `sql/altanto_analytics_v22_testers.sql` | Testers, audiencia y las vistas por persona de Hipótesis y Testers. |
+| `sql/altanto_analytics_v24_personas.sql` | Filtro por personas elegidas (ID o correo) en todas las secciones. |
 | `sql/altanto_analytics_v23_comercios.sql` | Cadenas de comercios, comercios por persona (Monitoreo de comercios) y el correo de entrada en el perfil. |
 | `manifest.webmanifest`, `icons/` | Ícono del panel, de la pestaña del navegador y de «Añadir a inicio». |
 
@@ -39,6 +40,8 @@ separado de la base de la app.
    Hipótesis, Testers y el filtro de audiencia.
 4. Corre [`sql/altanto_analytics_v23_comercios.sql`](sql/altanto_analytics_v23_comercios.sql) (después de v22) para
    Monitoreo de comercios y el correo de cada instalación.
+5. Corre [`sql/altanto_analytics_v24_personas.sql`](sql/altanto_analytics_v24_personas.sql) para filtrar por personas
+   elegidas.
 
 La llave del panel es la **publicable**: sólo puede llamar `ingest_analytics`; leer exige una sesión
 que esté en `analytics_admins`. Nunca pongas aquí la `service_role`.
@@ -52,7 +55,12 @@ que esté en `analytics_admins`. Nunca pongas aquí la `service_role`.
 - **Audiencia** (Todos · Testers · No testers): el panel manda el encabezado `x-audience` y
   `analytics_ev`, de la que salen todas las vistas, se queda sólo con esa audiencia. Así cada sección
   se puede ver por separado.
-- **Rango**: Hoy, 7, 30 o 90 días, o «Fechas» con desde y hasta dentro de los 90 días cargados.
+- **Rango**: Hoy, 7, 30 o 90 días, o desde y hasta exactos dentro de los 90 días cargados. Las flechas
+  mueven el rango entero hacia atrás o adelante.
+- **Personas**: «Elegir personas» filtra todas las secciones por una o varias instalaciones, buscadas por
+  ID, correo, alias o user persona (se puede pegar una lista). Manda sobre Testers / No testers.
+- **Menú**: las secciones van agrupadas; el menú se desliza con la rueda del mouse o las flechas, y
+  «Todas» las muestra de una vez.
 - **Hipótesis**: cada una contra su meta, con el desglose por user persona, género, edad o iPhone, el
   detalle persona por persona, su avance día a día y un mapa de las sesiones de cada tester del día 1
   al 14. Se miden al último día del rango; quien no llegó a su día 14 cuenta como «en curso». Las

@@ -2,6 +2,8 @@
 // Todo lo que llega de las vistas pasa por esc(): los eventos los manda
 // cualquiera con la llave publicable, así que no se confía en ningún texto.
 
+// Sin tildes y en minúsculas, para buscar «ines» y encontrar «Inés».
+const fold = (v) => String(v == null ? '' : v).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
 const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 // Íconos de trazo en 24 × 24.
@@ -21,6 +23,10 @@ const IC = {
   close: 'M18 6L6 18M6 6l12 12',
   refresh: 'M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15',
   logout: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
+  left: 'M15 18l-6-6 6-6',
+  right: 'M9 18l6-6-6-6',
+  check: 'M20 6L9 17l-5-5',
+  grid: 'M3 3h7v7H3zM14 3h7v7h-7zM14 14h7v7h-7zM3 14h7v7H3z',
 };
 const svg = (k, s) => `<svg width="${s || 18}" height="${s || 18}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${IC[k]}"></path></svg>`;
 // Ícono de cada KPI según su etiqueta.
@@ -45,17 +51,22 @@ class App {
     const q = new URLSearchParams(location.search);
     this.forceDemo = q.has('demo');
     this.captureHash();
-    this.state = { section: SECTIONS.some((s) => s.id === ui.section) || ui.section === 'mas' ? ui.section : 'resumen', range: ui.range || 30, from: ui.from || null, to: ui.to || null, aud: ui.aud || 'all', by: ui.by || 'persona', cohort: ui.cohort || '', wide: window.innerWidth >= 900, mode: !this.forceDemo && this.session() ? 'loading' : 'demo', data: null, email: null, notice: this.hashNotice || null, updatedAt: null, demoChosen: !!ui.demo };
+    this.state = { section: SECTIONS.some((s) => s.id === ui.section) || ui.section === 'mas' ? ui.section : 'resumen', range: ui.range || 30, from: ui.from || null, to: ui.to || null, aud: ui.aud || 'all', pick: Array.isArray(ui.pick) ? ui.pick.filter((x) => typeof x === 'string').slice(0, 200) : [], by: ui.by || 'persona', cohort: ui.cohort || '', wide: window.innerWidth >= 900, mode: !this.forceDemo && this.session() ? 'loading' : 'demo', data: null, email: null, notice: this.hashNotice || null, updatedAt: null, demoChosen: !!ui.demo };
     this.cards = new Map();
     this.sheet = false;
     this.detail = null;
     this.editing = null;
+    this.picking = null;
+    this.secMenu = false;
     this.animKey = null;
     window.addEventListener('resize', () => { const w = window.innerWidth >= 900; if (w !== this.state.wide) this.setState({ wide: w }); });
     window.addEventListener('scroll', () => this.onScroll(), { passive: true });
-    document.addEventListener('keydown', (e) => { if (e.key !== 'Escape') return; if (this.editing) this.editTester(null); else if (this.detail) this.openDetail(null); });
+    document.addEventListener('keydown', (e) => { if (e.key !== 'Escape') return; if (this.secMenu) this.toggleSecMenu(false); else if (this.picking) this.openPicker(false); else if (this.editing) this.editTester(null); else if (this.detail) this.openDetail(null); });
     root.addEventListener('change', (e) => this.onChange(e));
-    root.addEventListener('input', (e) => { if (e.target.matches('[data-q]')) { rosterQ = e.target.value; this.paintRoster(); } });
+    root.addEventListener('input', (e) => { if (e.target.matches('[data-q]')) { rosterQ = e.target.value; this.paintRoster(); } else if (e.target.matches('[data-pq]')) { this.picking.q = e.target.value; this.paintPicker(); } });
+    // La rueda del mouse mueve el menú de secciones de lado a lado.
+    root.addEventListener('wheel', (e) => { const t = e.target.closest('[data-tabs]'); if (!t || Math.abs(e.deltaY) <= Math.abs(e.deltaX) || t.scrollWidth <= t.clientWidth) return; e.preventDefault(); t.scrollLeft += e.deltaY; }, { passive: false });
+    root.addEventListener('scroll', (e) => { if (e.target.matches && e.target.matches('[data-tabs]')) { this._navX = e.target.scrollLeft; this.navEdges(); } }, true);
     root.addEventListener('click', (e) => this.onClick(e));
     root.addEventListener('mouseover', (e) => this.onHover(e));
     root.addEventListener('mousemove', (e) => this.onMove(e));
@@ -69,15 +80,19 @@ class App {
   }
 
   setState(p) { Object.assign(this.state, p); this.render(); }
-  saveUI(p) { const S = this.state; try { localStorage.setItem(LS_UI, JSON.stringify({ section: S.section, range: S.range, from: S.from, to: S.to, aud: S.aud, by: S.by, cohort: S.cohort, demo: S.demoChosen, ...p })); } catch (e) {} }
+  saveUI(p) { const S = this.state; try { localStorage.setItem(LS_UI, JSON.stringify({ section: S.section, range: S.range, from: S.from, to: S.to, aud: S.aud, pick: S.pick, by: S.by, cohort: S.cohort, demo: S.demoChosen, ...p })); } catch (e) {} }
   // Los datos que se dibujan: los de Supabase o, sin sesión, los de ejemplo.
   data() { const S = this.state; return S.mode === 'live' && S.data ? S.data : this._demo || (this._demo = makeDemo()); }
   // Primer y último día del rango. Con «Fechas», dentro de los 90 días cargados.
   span() {
     const S = this.state, today = limaToday(), lo = addD(today, -89);
     if (S.range !== 'custom') return { from: addD(today, -(+S.range - 1)), to: today };
+    return this.clampSpan(S.from, S.to);
+  }
+  clampSpan(f, t) {
+    const today = limaToday(), lo = addD(today, -89);
     const c = (d, f) => (d && /^\d{4}-\d\d-\d\d$/.test(d) ? (d < lo ? lo : d > today ? today : d) : f);
-    let to = c(S.to, today), from = c(S.from, addD(to, -13));
+    let to = c(t, today), from = c(f, addD(to, -13));
     if (from > to) [from, to] = [to, from];
     return { from, to };
   }
@@ -114,7 +129,8 @@ class App {
       const tk = await this.token();
       if (!tk) throw Object.assign(new Error('Sesión vencida'), { code: 401 });
       const today = limaToday();
-      const aud = this.state.aud;
+      // Personas elegidas: mandan sobre Testers / No testers.
+      const aud = this.state.pick.length ? { ids: this.state.pick } : this.state.aud;
       // [vista, filtro, audiencia]: las de personas (v22) van sin audiencia.
       const jobs = [];
       DAILY.forEach((v) => jobs.push([v, 'day=gte.' + addD(today, -89) + '&order=day.asc', aud]));
@@ -142,7 +158,7 @@ class App {
       if (miss22.length) parts.push('Faltan las vistas de testers e hipótesis: corre sql/altanto_analytics_v22_testers.sql (está en este repo) y toca Actualizar.' + (aud !== 'all' ? ' Sin ella, el filtro Testers / No testers no separa nada.' : ''));
       if (miss23.length) parts.push('Falta la vista de Monitoreo de comercios: corre sql/altanto_analytics_v23_comercios.sql (está en este repo) y toca Actualizar.');
       let notice = parts.join(' ') || null;
-      if (!notice && empty) notice = aud !== 'all' ? 'Ninguna vista trae datos para «' + lab('aud', aud) + '». ¿Ya marcaste a los testers en la sección Testers?' : await this.diagnose(tk, user);
+      if (!notice && empty) notice = this.state.pick.length ? 'Ninguna vista trae datos de las personas elegidas en este rango.' : aud !== 'all' ? 'Ninguna vista trae datos para «' + lab('aud', aud) + '». ¿Ya marcaste a los testers en la sección Testers?' : await this.diagnose(tk, user);
       this.setState({ mode: 'live', data, email: user.email || 'sesión iniciada', notice, updatedAt: new Date() });
     } catch (e) {
       if (e.code === 401) localStorage.removeItem(LS_SESSION);
@@ -188,17 +204,29 @@ class App {
     const bar = e.target.closest('[data-bar]');
     if (bar) { this.showTip(bar); return; }
     const el = e.target.closest('[data-act]');
+    // Un toque fuera del menú de secciones lo cierra.
+    if (this.secMenu && !e.target.closest('[data-secmenu]') && !(el && el.dataset.act === 'secmenu')) this.toggleSecMenu(false);
     if (!el) return;
     const a = el.dataset.act;
-    if (a === 'go') this.go(el.dataset.id);
+    if (a === 'go') { this.secMenu = false; this.go(el.dataset.id); }
     else if (a === 'tab') {
       // Tocar la pestaña en la que ya estás sube al inicio (o vuelve a la lista de «Más»).
       const id = el.dataset.id;
       if (id === this.tab()) { if (id === 'mas' && this.state.section !== 'mas') this.go('mas'); else window.scrollTo({ top: 0, behavior: 'smooth' }); }
       else this.go(id);
     }
-    else if (a === 'range') { const n = el.dataset.n === 'custom' ? 'custom' : +el.dataset.n; const p = { range: n }; if (n === 'custom' && !this.state.from) Object.assign(p, this.span(), { range: 'custom' }); this.setState(p); this.saveUI(); }
-    else if (a === 'aud') { if (el.dataset.n === this.state.aud) return; this.setState({ aud: el.dataset.n }); this.saveUI(); if (this.state.mode !== 'demo') this.load(); }
+    else if (a === 'range') { this.setState({ range: +el.dataset.n }); this.saveUI(); }
+    else if (a === 'shift') this.shift(+el.dataset.n);
+    else if (a === 'aud') { if (el.dataset.n === this.state.aud && !this.state.pick.length) return; this.setState({ aud: el.dataset.n, pick: [] }); this.saveUI(); if (this.state.mode !== 'demo') this.load(); }
+    else if (a === 'pick') this.openPicker(true);
+    else if (a === 'p-close') this.openPicker(false);
+    else if (a === 'p-toggle') { const d = this.picking.sel; const id = el.dataset.id; if (d.has(id)) d.delete(id); else d.add(id); this.paintPicker(); }
+    else if (a === 'p-all') { this.pickHits().forEach((p) => this.picking.sel.add(p.id)); this.paintPicker(); }
+    else if (a === 'p-clear') { this.picking.sel.clear(); this.paintPicker(); }
+    else if (a === 'p-apply') this.applyPick([...this.picking.sel]);
+    else if (a === 'p-drop') this.applyPick(this.state.pick.filter((x) => x !== el.dataset.id));
+    else if (a === 'navscroll') { const t = this.root.querySelector('[data-tabs]'); if (t) t.scrollBy({ left: +el.dataset.n * t.clientWidth * 0.7, behavior: 'smooth' }); }
+    else if (a === 'secmenu') this.toggleSecMenu(!this.secMenu);
     else if (a === 'by') { this.setState({ by: el.dataset.n }); this.saveUI(); }
     else if (a === 't-toggle') { const p = people(this.data()).find((x) => x.id === el.dataset.id); if (p) this.saveTesters([{ install_id: p.id, is_tester: !p.tester }]); }
     else if (a === 'mark-tf') {
@@ -219,10 +247,62 @@ class App {
   }
   onChange(e) {
     const k = e.target.dataset.ch;
-    if (k === 'from' || k === 'to') { this.setState({ [k]: e.target.value || null, range: 'custom' }); this.saveUI(); }
+    if (k === 'from' || k === 'to') { if (!e.target.value) return; const sp = this.span(); sp[k] = e.target.value; const c = this.clampSpan(sp.from, sp.to); this.setState({ from: c.from, to: c.to, range: 'custom' }); this.saveUI(); }
     else if (k === 'cohort') { this.setState({ cohort: e.target.value }); this.saveUI(); }
   }
   go(id) { this.detail = null; window.scrollTo(0, 0); this.setState({ section: id }); this.saveUI({ section: id }); }
+
+  // Mueve el rango entero hacia atrás (-1) o adelante (+1), sin salir de los 90 días cargados.
+  shift(n) {
+    const today = limaToday(), lo = addD(today, -89);
+    const { from, to } = this.span();
+    const len = Math.round((new Date(to + 'T00:00:00Z') - new Date(from + 'T00:00:00Z')) / 864e5) + 1;
+    let f = addD(from, n * len), t = addD(to, n * len);
+    if (t > today) { t = today; f = addD(today, -(len - 1)); }
+    if (f < lo) { f = lo; t = addD(lo, len - 1); if (t > today) t = today; }
+    // Si vuelve a terminar hoy con un largo de los botones, queda como ese botón.
+    if (t === today && [1, 7, 30, 90].includes(len)) this.setState({ range: len });
+    else this.setState({ range: 'custom', from: f, to: t });
+    this.saveUI();
+  }
+
+  // ── Menú de secciones ──────────────────────────────────────────────────
+  toggleSecMenu(open) { this.secMenu = open; const m = this.root.querySelector('[data-secmenu]'); if (m) m.classList.toggle('open', open); const b = this.root.querySelector('[data-act="secmenu"]'); if (b) b.setAttribute('aria-expanded', open); }
+  // Flechas y degradado sólo donde queda menú escondido.
+  navEdges() {
+    const t = this.root.querySelector('[data-tabs]'), w = t && t.parentElement;
+    if (!w) return;
+    w.classList.toggle('can-l', t.scrollLeft > 4);
+    w.classList.toggle('can-r', t.scrollLeft + t.clientWidth < t.scrollWidth - 4);
+  }
+
+  // ── Personas elegidas ──────────────────────────────────────────────────
+  openPicker(open) {
+    this.picking = open ? { q: '', sel: new Set(this.state.pick) } : null;
+    if (!open) document.documentElement.classList.remove('noscroll');
+    this.paintDetail(open);
+  }
+  // Coincide con el ID, el correo, el alias, la persona o el iPhone. Varios
+  // términos separados por coma o espacio buscan cualquiera (pegar una lista).
+  pickHits() {
+    const terms = fold(this.picking.q).split(/[\s,;]+/).filter(Boolean);
+    const all = people(this.data()).slice().sort((a, b) => (b.tester - a.tester) || String(b.last || '').localeCompare(String(a.last || '')));
+    if (!terms.length) return all;
+    return all.filter((p) => { const hay = [p.id, p.email, p.alias, p.persona, p.iphone].map(fold); return terms.some((t) => hay.some((h) => h.includes(t))); });
+  }
+  paintPicker() {
+    const host = this.root.querySelector('[data-plist]');
+    if (host) host.innerHTML = pickList(this.pickHits(), this.picking.sel);
+    const n = this.root.querySelector('[data-pcount]');
+    if (n) n.textContent = pickCount(this.picking.sel.size);
+  }
+  applyPick(ids) {
+    this.picking = null;
+    document.documentElement.classList.remove('noscroll');
+    this.setState({ pick: ids });
+    this.saveUI();
+    if (this.state.mode !== 'demo') this.load();
+  }
 
   // ── Testers ────────────────────────────────────────────────────────────
   editTester(id) { this.editing = id; this.paintDetail(true); }
@@ -270,6 +350,12 @@ class App {
   openDetail(id) { this.detail = id; this.paintDetail(true); }
   paintDetail(anim) {
     const host = this.root.querySelector('[data-dlg]');
+    if (this.picking && host) {
+      document.documentElement.classList.add('noscroll');
+      host.innerHTML = renderPicker(this.pickHits(), this.picking, anim);
+      if (anim) { const i = host.querySelector('[data-pq]'); if (i && this.state.wide) i.focus({ preventScroll: true }); }
+      return;
+    }
     if (this.editing && host) {
       const D = this.data(), all = people(D);
       const p = all.find((x) => x.id === this.editing);
@@ -372,18 +458,18 @@ class App {
     const { from, to } = this.span();
     const days = [];
     for (let d = from; d <= to; d = addD(d, 1)) days.push(d);
-    const ctx = { D: data, today, start: from, end: to, days, range: days.length, wide: S.wide, aud: S.aud, by: S.by, cohort: S.cohort };
+    const ctx = { D: data, today, start: from, end: to, days, range: days.length, wide: S.wide, aud: S.aud, pick: new Set(S.pick), by: S.by, cohort: S.cohort };
     let built;
     let buildError = null;
     try { built = build(sec.id, ctx); } catch (e) { console.error(e); buildError = e; built = { kpis: [], cards: [] }; }
     this.cards = new Map(built.cards.map((c) => [c.id, c]));
     const t = S.updatedAt ? S.updatedAt.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }) : '';
     const status = loading ? { dot: 'var(--c-blue)', text: 'Cargando…' } : live ? { dot: 'var(--pos)', text: S.email + (t ? ' · ' + t : '') } : { dot: 'var(--c-orange)', text: 'Datos de ejemplo' };
-    const footer = (live || loading ? 'En vivo desde las vistas analytics_* de Supabase.' : 'Datos de ejemplo con la misma forma que las vistas analytics_*. Entra con una cuenta de analytics_admins para ver los reales.') + ' Audiencia: ' + lab('aud', S.aud) + '. Hora de Lima; excluye el canal debug.';
+    const footer = (live || loading ? 'En vivo desde las vistas analytics_* de Supabase.' : 'Datos de ejemplo con la misma forma que las vistas analytics_*. Entra con una cuenta de analytics_admins para ver los reales.') + ' Audiencia: ' + (S.pick.length ? pickCount(S.pick.length) : lab('aud', S.aud)) + '. Hora de Lima; excluye el canal debug.';
     // Con los datos de ejemplo sólo las secciones por persona cambian con la audiencia.
-    const audNote = !live && !loading && S.aud !== 'all' && !PEOPLE_SECTIONS.includes(sec.id) ? 'Con los datos de ejemplo, el filtro Testers / No testers sólo cambia Hipótesis y Testers. Con datos reales filtra todas las secciones.' : null;
+    const audNote = !live && !loading && (S.aud !== 'all' || S.pick.length) && !PEOPLE_SECTIONS.includes(sec.id) ? 'Con los datos de ejemplo, los filtros de audiencia y de personas sólo cambian Hipótesis, Testers y Monitoreo de comercios. Con datos reales filtran todas las secciones.' : null;
     // Las animaciones de entrada sólo corren al cambiar de sección, rango, audiencia o datos.
-    const key = [sec.id, from, to, S.aud, S.mode, S.wide].join('|');
+    const key = [sec.id, from, to, S.aud, S.pick.join(','), S.mode, S.wide].join('|');
     const enter = key !== this.animKey;
     this.animKey = key;
     return { loading, live, range, built, buildError, status, footer, enter, audNote };
@@ -393,17 +479,25 @@ class App {
   controls(sec, mobile) {
     const S = this.state, today = limaToday();
     const seg = (act, opts, cur) => `<div class="${mobile ? 'm-seg' : 'seg'}"${mobile ? ` style="grid-template-columns:repeat(${opts.length},1fr)"` : ''}>${opts.map(([v, l]) => `<button class="${String(v) === String(cur) ? 'on' : ''}" data-act="${act}" data-n="${esc(v)}">${esc(l)}</button>`).join('')}</div>`;
-    const out = [seg('aud', Object.entries(LBL.aud), S.aud)];
+    // Con personas elegidas, ningún botón de audiencia queda marcado.
+    const out = [seg('aud', Object.entries(LBL.aud), S.pick.length ? null : S.aud)];
+    const all = people(this.data());
+    const one = S.pick.length === 1 ? all.find((p) => p.id === S.pick[0]) : null;
+    const pl = !S.pick.length ? 'Elegir personas' : one ? one.alias || one.email || one.short : pickCount(S.pick.length);
+    out[0] = `<div class="ctl-row">${out[0]}<button class="pick-btn${S.pick.length ? ' on' : ''}" data-act="pick" aria-haspopup="dialog">${svg('users', 16)}<span>${esc(pl)}</span></button></div>`;
     if (!sec.fixed) {
-      out.push(seg('range', mobile ? [[1, 'Hoy'], [7, '7 d'], [30, '30 d'], [90, '90 d'], ['custom', 'Fechas']] : [[1, 'Hoy'], [7, '7 días'], [30, '30 días'], [90, '90 días'], ['custom', 'Fechas']], S.range));
-      if (S.range === 'custom') {
-        const { from, to } = this.span(), lo = addD(today, -89);
-        out.push(`<div class="dates"><label><span>Desde</span><input type="date" data-ch="from" value="${esc(from)}" min="${lo}" max="${today}"></label><label><span>Hasta</span><input type="date" data-ch="to" value="${esc(to)}" min="${lo}" max="${today}"></label></div>`);
-      }
+      out.push(seg('range', mobile ? [[1, 'Hoy'], [7, '7 d'], [30, '30 d'], [90, '90 d']] : [[1, 'Hoy'], [7, '7 días'], [30, '30 días'], [90, '90 días']], S.range));
+      const { from, to } = this.span(), lo = addD(today, -89);
+      out.push(`<div class="dates"><button class="dstep" data-act="shift" data-n="-1" aria-label="Rango anterior"${from <= lo ? ' disabled' : ''}>${svg('left', 16)}</button><label><span>Desde</span><input type="date" data-ch="from" value="${esc(from)}" min="${lo}" max="${today}"></label><i>–</i><label><span>Hasta</span><input type="date" data-ch="to" value="${esc(to)}" min="${lo}" max="${today}"></label><button class="dstep" data-act="shift" data-n="1" aria-label="Rango siguiente"${to >= today ? ' disabled' : ''}>${svg('right', 16)}</button></div>`);
     }
     if (sec.id === 'hipotesis') out.push(seg('by', Object.entries(LBL.by), S.by));
     const cohorts = [...new Set((this.data().analytics_testers || []).map((t) => t.cohort).filter(Boolean))].sort();
     if (PEOPLE_SECTIONS.includes(sec.id) && cohorts.length) out.push(`<select class="sel" data-ch="cohort" aria-label="Grupo de prueba"><option value="">Todos los grupos</option>${cohorts.map((c) => `<option${c === S.cohort ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select>`);
+    // Las personas elegidas, como fichas que se quitan de a una.
+    if (S.pick.length) {
+      const pm = new Map(all.map((p) => [p.id, p]));
+      out.push(`<div class="pick-chips">${S.pick.slice(0, 8).map((id) => { const p = pm.get(id); return `<button class="pchip" data-act="p-drop" data-id="${esc(id)}" title="Quitar">${esc(p ? p.alias || p.email || p.short : String(id).slice(0, 8))}${svg('close', 12)}</button>`; }).join('')}${S.pick.length > 8 ? `<span class="pchip more">+${S.pick.length - 8}</span>` : ''}<button class="pchip clear" data-act="aud" data-n="${esc(S.aud)}">Quitar filtro</button></div>`);
+    }
     return out.join('');
   }
 
@@ -419,7 +513,9 @@ class App {
     const sec = SECTIONS.find((s) => s.id === S.section) || SECTIONS[0];
     const { loading, live, built, buildError, status, footer, enter, audNote } = this.view(sec);
     document.title = sec.label + ' · AlTanto Analytics';
-    const nav = SECTIONS.map((s) => `<button class="${s.id === sec.id ? 'on' : ''}" data-act="go" data-id="${esc(s.id)}">${esc(s.label)}</button>`).join('');
+    const grouped = SEC_GROUPS.map((g) => ({ label: g.label, list: g.ids.map((id) => SECTIONS.find((s) => s.id === id)).filter(Boolean) }));
+    const nav = grouped.map((g) => g.list.map((s) => `<button class="${s.id === sec.id ? 'on' : ''}" data-act="go" data-id="${esc(s.id)}">${esc(s.label)}</button>`).join('')).join('<span class="tabs-sep" aria-hidden="true"></span>');
+    const menu = grouped.map((g) => `<div class="sm-group"><div class="sm-title">${esc(g.label)}</div>${g.list.map((s) => `<button class="sm-item${s.id === sec.id ? ' on' : ''}" data-act="go" data-id="${esc(s.id)}"><b>${esc(s.label)}</b><span>${esc(s.desc)}</span></button>`).join('')}</div>`).join('');
     const who = live && S.email ? S.email.trim()[0].toUpperCase() : '';
 
     this.root.innerHTML = `
@@ -433,7 +529,15 @@ class App {
             ${who ? `<div class="avatar" title="${esc(S.email)}">${esc(who)}</div>` : ''}
           </div>
         </header>
-        <nav class="tabs anim" style="--i:1">${nav}</nav>
+        <div class="tabs-wrap anim" style="--i:1">
+          <div class="tabs-scroll">
+            <button class="tabs-arr l" data-act="navscroll" data-n="-1" aria-label="Ver secciones anteriores">${svg('left', 16)}</button>
+            <nav class="tabs" data-tabs>${nav}</nav>
+            <button class="tabs-arr r" data-act="navscroll" data-n="1" aria-label="Ver más secciones">${svg('right', 16)}</button>
+          </div>
+          <button class="tabs-all" data-act="secmenu" aria-haspopup="true" aria-expanded="${this.secMenu}">${svg('grid', 16)}<span>Todas</span></button>
+          <div class="sec-menu${this.secMenu ? ' open' : ''}" data-secmenu>${menu}</div>
+        </div>
         <section class="hero anim" style="--i:2">
           <div class="hero-text"><h1>${esc(sec.label)}</h1><div class="desc">${esc(sec.desc)}</div></div>
           <div class="hero-ctl">${this.controls(sec, false)}</div>
@@ -446,7 +550,14 @@ class App {
         <div class="footer">${esc(footer)}</div>
       </div>
       <div data-dlg></div>`;
-    if (enter) { const on = this.root.querySelector('.tabs .on'); if (on) on.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }
+    // El menú no salta al volver a dibujar: vuelve a donde estaba y sólo se mueve si la sección elegida queda fuera.
+    const tb = this.root.querySelector('[data-tabs]'), on = tb && tb.querySelector('.on');
+    if (tb) {
+      if (this._navX != null) tb.scrollLeft = this._navX;
+      if (on && (on.offsetLeft < tb.scrollLeft || on.offsetLeft + on.offsetWidth > tb.scrollLeft + tb.clientWidth)) tb.scrollLeft = Math.max(0, on.offsetLeft - (tb.clientWidth - on.offsetWidth) / 2);
+      this._navX = tb.scrollLeft;
+    }
+    this.navEdges();
   }
 
   // ── Móvil (< 900 px): app de iPhone con barra de pestañas ──────────────
@@ -489,14 +600,15 @@ class App {
         <div class="footer m-pad">${esc(footer)}</div>`;
     } else {
       const PAL = ['#d6451b', '#2b4f9e', '#17171a', '#2f6b55', '#c99a12'];
-      const more = SECTIONS.filter((s) => !MAIN_TABS.includes(s.id));
+      let k = 0;
+      const groups = SEC_GROUPS.map((g) => ({ label: g.label, list: g.ids.filter((id) => !MAIN_TABS.includes(id)).map((id) => SECTIONS.find((s) => s.id === id)).filter(Boolean) })).filter((g) => g.list.length);
       body = `<div class="m-head anim" style="--i:0"><h1>Más</h1></div>
         ${S.notice ? `<div class="m-pad"><div class="notice">${esc(S.notice)}</div></div>` : ''}
-        <div class="m-group anim" style="--i:1">${more.map((s, i) => `<button class="m-row" data-act="go" data-id="${esc(s.id)}">
-          <span class="m-badge" style="background:${PAL[i % PAL.length]}">${esc(s.label[0])}</span>
+        ${groups.map((g, gi) => `<div class="m-gtitle anim" style="--i:${gi + 1}">${esc(g.label)}</div><div class="m-group anim" style="--i:${gi + 1}">${g.list.map((s) => `<button class="m-row" data-act="go" data-id="${esc(s.id)}">
+          <span class="m-badge" style="background:${PAL[k++ % PAL.length]}">${esc(s.label[0])}</span>
           <span class="m-row-text"><span class="m-row-title">${esc(s.label)}</span><span class="m-row-sub">${esc(s.desc)}</span></span>${chev}
-        </button>`).join('')}</div>
-        <div class="m-group anim" style="--i:2"><button class="m-row m-account" data-act="sheet" data-open="1">${dot(status.dot)}<span class="m-row-title grow">${esc(status.text)}</span><span class="m-row-aside">Cuenta</span>${chev}</button></div>
+        </button>`).join('')}</div>`).join('')}
+        <div class="m-group anim" style="--i:${groups.length + 1}"><button class="m-row m-account" data-act="sheet" data-open="1">${dot(status.dot)}<span class="m-row-title grow">${esc(status.text)}</span><span class="m-row-aside">Cuenta</span>${chev}</button></div>
         <div class="m-foot">Hora de Lima · semana desde el lunes · sin canal debug</div>`;
     }
 
@@ -531,6 +643,37 @@ class App {
 }
 
 const MAIN_TABS = ['resumen', 'hipotesis', 'testers', 'activacion'];
+// Cómo se agrupan las secciones en el menú, en «Todas» y en «Más».
+const SEC_GROUPS = [
+  { label: 'Prueba con usuarios', ids: ['resumen', 'hipotesis', 'testers'] },
+  { label: 'Uso del producto', ids: ['activacion', 'uso', 'adopcion'] },
+  { label: 'Correo y clasificación', ids: ['correo', 'clasificacion', 'comercios', 'monitoreo', 'suscripciones'] },
+  { label: 'Negocio y calidad', ids: ['pro', 'calidad', 'versiones'] },
+];
+const pickCount = (n) => n + (n === 1 ? ' persona' : ' personas');
+
+// Hoja para elegir personas por ID, correo o alias (una o varias).
+function renderPicker(hits, st, anim) {
+  return `<div class="dlg-back${anim ? ' anim-in' : ''}" data-act="p-close"></div>
+    <div class="dlg pick-dlg${anim ? ' anim-in' : ''}" role="dialog" aria-modal="true" aria-label="Elegir personas">
+      <div class="dlg-head">
+        <div class="card-titles"><div class="dlg-kicker">Filtro</div><div class="dlg-title">Elegir personas</div><div class="card-sub">Busca por ID, correo, alias o user persona. Para elegir varias de una vez, pega una lista separada por comas o espacios y toca «Elegir los resultados».</div></div>
+        <button class="icon-btn" data-act="p-close" aria-label="Cerrar">${svg('close', 18)}</button>
+      </div>
+      <div class="pick-tools"><input class="roster-q" type="search" data-pq value="${esc(st.q)}" placeholder="ID, correo, alias…" aria-label="Buscar personas"><button class="pill ghost small" data-act="p-all">Elegir los resultados</button><button class="pill ghost small" data-act="p-clear">Ninguna</button></div>
+      <div class="dlg-body"><div data-plist>${pickList(hits, st.sel)}</div></div>
+      <div class="pick-foot"><span data-pcount>${esc(pickCount(st.sel.size))}</span><button class="pill ghost" data-act="p-close">Cancelar</button><button class="pill primary" data-act="p-apply">Aplicar</button></div>
+    </div>`;
+}
+function pickList(hits, sel) {
+  if (!hits.length) return '<div class="empty">Nadie coincide con la búsqueda.</div>';
+  const max = 300;
+  return `<div class="pick-list">${hits.slice(0, max).map((p) => { const on = sel.has(p.id); return `<button class="pk${on ? ' on' : ''}" data-act="p-toggle" data-id="${esc(p.id)}" role="checkbox" aria-checked="${on}">
+      <span class="pk-box">${on ? svg('check', 14) : ''}</span>
+      <span class="pk-main"><span class="pk-title"><code>${esc(p.short)}</code>${p.alias ? `<b>${esc(p.alias)}</b>` : ''}${p.tester ? '<span class="pk-tag">Tester</span>' : ''}</span><span class="pk-sub">${esc([p.email, p.persona, p.iphone, p.channel ? lab('channel', p.channel) : ''].filter(Boolean).join(' · ') || '—')}</span></span>
+      <span class="pk-days">${esc(p.last ? fd(p.last) : '')}</span>
+    </button>`; }).join('')}</div>${hits.length > max ? `<div class="rr-more">Mostrando ${max} de ${hits.length}. Afina la búsqueda.</div>` : ''}`;
+}
 // Las que se arman persona por persona (v22): cambian con la audiencia también con los datos de ejemplo.
 const PEOPLE_SECTIONS = ['hipotesis', 'testers', 'monitoreo'];
 let rosterQ = '';
@@ -712,8 +855,8 @@ function renderBody(c, mobile, full) {
 
 // Las filas de la lista de instalaciones que coinciden con la búsqueda.
 function rosterList(c) {
-  const q = rosterQ.trim().toLowerCase();
-  const hit = c.people.filter((p) => !q || [p.id, p.alias, p.email, p.persona, p.cohort, p.iphone].some((v) => String(v || '').toLowerCase().includes(q)));
+  const q = fold(rosterQ.trim());
+  const hit = c.people.filter((p) => !q || [p.id, p.alias, p.email, p.persona, p.cohort, p.iphone].some((v) => fold(v).includes(q)));
   const max = 200;
   if (!c.people.length) return `<div class="empty">Todavía no hay instalaciones. Corre sql/altanto_analytics_v22_testers.sql y toca Actualizar.</div>`;
   if (!hit.length) return `<div class="empty">Ninguna instalación coincide con «${esc(rosterQ)}»</div>`;

@@ -70,6 +70,8 @@ const FH = (h) => (!ok(h) ? '—' : h < 1 ? Math.round(h * 60) + ' min' : h < 48
 const num = (v) => (ok(v) ? +v : 0);
 // Último día del rango elegido; lo fija build(). Con «Fechas» puede no ser hoy.
 let R_END = null;
+// Personas elegidas a mano (sus install_id): mandan sobre Testers / No testers.
+let R_PICK = null;
 const inR = (rows, start, key) => (rows || []).filter((x) => { const d = String(x[key || 'day']).slice(0, 10); return d >= start && (!R_END || d <= R_END); });
 const group = (rows, kf, vf) => { const m = new Map(); (rows || []).forEach((x) => { const k = kf(x); m.set(k, (m.get(k) || 0) + num(vf(x))); }); return m; };
 const sum = (rows, f) => (rows || []).reduce((a, x) => a + num(typeof f === 'function' ? f(x) : x[f]), 0);
@@ -319,10 +321,12 @@ const V23 = ['analytics_merchant_person_daily'];
 
 // `aud` (testers / others) viaja en el encabezado x-audience, que v22 lee en
 // analytics_ev para que cada vista cuente sólo a esa audiencia.
+// `aud`: 'testers', 'others', 'all' o { ids: [install_id…] } para personas elegidas (v24).
 async function fetchView(view, filter, token, aud) {
   let out = [];
   const headers = { apikey: SB_KEY, Authorization: 'Bearer ' + token };
-  if (aud && aud !== 'all') headers['x-audience'] = aud;
+  if (aud && typeof aud === 'object') { headers['x-audience'] = 'ids'; headers['x-audience-ids'] = aud.ids.join(','); }
+  else if (aud && aud !== 'all') headers['x-audience'] = aud;
   for (let off = 0; off < 50000; off += 1000) {
     const res = await fetch(SB_URL + '/rest/v1/' + view + '?select=*' + (filter ? '&' + filter : '') + '&limit=1000&offset=' + off, { headers });
     if (res.status === 401) { const e = new Error('Sesión vencida'); e.code = 401; throw e; }
@@ -506,7 +510,7 @@ function people(D) {
   return (D._people = out);
 }
 const pname = (p) => p.alias || p.short;
-const inAud = (p, aud, cohort) => (aud === 'testers' ? p.tester : aud === 'others' ? !p.tester : true) && (!cohort || p.cohort === cohort);
+const inAud = (p, aud, cohort) => (R_PICK ? R_PICK.has(p.id) : aud === 'testers' ? p.tester : aud === 'others' ? !p.tester : true) && (!cohort || p.cohort === cohort);
 const byKey = (by, p) => (by === 'gender' ? lab('gender', p.gender || null) : by === 'age' ? ageBand(p.age) : by === 'iphone' ? p.iphone : p.persona) || 'Sin dato';
 
 // Día n de la prueba de p, lo sumado de `k` entre sus días a y b (hasta `asOf`)
@@ -600,6 +604,7 @@ function build(id, ctx) {
   const D = ctx.D, st = ctx.start, days = ctx.days, R = ctx.range, T = ctx.today;
   const perDay = (rows, f) => { const m = group(rows, (x) => String(x.day).slice(0, 10), f); return (d) => m.get(d) || 0; };
   R_END = ctx.end || null;
+  R_PICK = ctx.pick && ctx.pick.size ? ctx.pick : null;
   const surveyed = (p) => ['s_matches', 's_min_after', 's_replaced', 's_pay', 's_fatal', 's_recommended'].some((k) => p.s[k] != null && p.s[k] !== '');
 
   if (id === 'hipotesis') {
@@ -859,7 +864,7 @@ function build(id, ctx) {
     // Compras con tarjeta por persona y cadena (v23). Lo que importa: dónde la
     // gente le corrige la categoría al motor y qué comercios llegan sin ella.
     const PM = new Map(people(D).map((p) => [p.id, p]));
-    const inA = (x) => { const p = PM.get(x.install_id); return p ? inAud(p, ctx.aud, ctx.cohort) : ctx.aud !== 'testers' && !ctx.cohort; };
+    const inA = (x) => { const p = PM.get(x.install_id); return p ? inAud(p, ctx.aud, ctx.cohort) : !R_PICK && ctx.aud !== 'testers' && !ctx.cohort; };
     const rows = inR(D.analytics_merchant_person_daily, st).filter(inA);
     const who = (iid) => { const p = PM.get(iid); return p ? p.alias || p.email || p.short : String(iid).slice(0, 8); };
     const mail = (iid) => { const p = PM.get(iid); return (p && p.email) || '—'; };
