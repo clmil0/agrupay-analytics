@@ -20,6 +20,7 @@ de un administrador. Sin sesión muestra datos de ejemplo con la misma forma.
 | `sql/altanto_analytics_v24_personas.sql` | Filtro por personas elegidas (ID o correo) en todas las secciones. |
 | `sql/altanto_analytics_v26_rendimiento.sql` | Caché incremental: el panel carga en una llamada y Supabase procesa sólo los eventos nuevos. |
 | `sql/altanto_analytics_v27_sistema.sql` | Estado de los datos y espacio de la base, para el Resumen. |
+| `sql/altanto_analytics_v28_monitoreo.sql` | Sección Sistema: pasadas de la caché, tiempos de carga del panel y llegada de eventos. |
 | `sql/altanto_analytics_v23_comercios.sql` | Cadenas de comercios, comercios por persona (Monitoreo de comercios) y el correo de entrada en el perfil. |
 | `manifest.webmanifest`, `icons/` | Ícono del panel, de la pestaña del navegador y de «Añadir a inicio». |
 
@@ -52,6 +53,8 @@ separado de la base de la app.
    Si vuelves a correr v22, corre v26 otra vez después: v22 rehace `analytics_ev` con el filtro lento.
 8. Corre [`sql/altanto_analytics_v27_sistema.sql`](sql/altanto_analytics_v27_sistema.sql) (después de v26) para
    que el Resumen muestre cómo se leen los datos y cuánto ocupa la base.
+9. Corre [`sql/altanto_analytics_v28_monitoreo.sql`](sql/altanto_analytics_v28_monitoreo.sql) (después de v27) para
+   la sección Sistema.
 
 La llave del panel es la **publicable**: sólo puede llamar `ingest_analytics`; leer exige una sesión
 que esté en `analytics_admins`. Nunca pongas aquí la `service_role`.
@@ -107,6 +110,20 @@ Antes, cada visita pedía ~58 vistas y cada una recorría todos los eventos desd
   se llenaría. Medirlo cuesta milisegundos. El límite está en `analytics_cache_state.db_limit_bytes`
   (500 MB, plan Free); al pasar a Pro: `update analytics_cache_state set db_limit_bytes = 8 * 1024^3;`.
 - **Bitácora**: tipo nuevo «Cambio en el panel o la analítica» para anotar cambios como estos.
+
+## Sistema (v28)
+
+Sección del menú (grupo Panel) para vigilar que todo funcione:
+
+- **Chequeos** que el panel revisa solo: actualización automática (pg_cron), llegada de eventos,
+  retraso con que llegan, espacio en la base, velocidad del panel y copias de seguridad. En naranja,
+  lo que hay que mirar; el Resumen avisa «N por revisar en Sistema».
+- **Eventos recibidos** por hora (48 h) y por día (30 días), y el **retraso** de los eventos (la app
+  manda lo pendiente al abrirse).
+- **Tiempo de carga del panel**, medido en el navegador de cada administrador sin guardar quién
+  (`analytics_panel_loads`, 90 días). Sirve para mostrar el efecto de los cambios al panel.
+- **Últimas actualizaciones de la caché** (`analytics_refresh_log`, 30 días): cuándo, si fue
+  automática o desde el panel, cuántos eventos nuevos y cuánto tardó.
 
 ## Bitácora (v25) y guía
 

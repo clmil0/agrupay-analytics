@@ -148,9 +148,12 @@ class App {
     const current = () => seq === this.loadSeq;
     const aud = this.state.aud;
     const cached = !this.state.pick.length;
+    // Cuánto tarda esta carga; se guarda en analytics_panel_loads (sección Sistema), sin quién.
+    const t0 = performance.now(), ms = () => Math.round(performance.now() - t0);
+    const tm = { source: cached ? 'cache' : 'views', aud: cached ? aud : 'ids' };
     const saved = cached ? await idbGet('dash:' + aud) : null;
     if (!current()) return;
-    if (saved && saved.views) this.setState({ mode: 'live', data: saved.views, email: saved.email, notice: null, updatedAt: new Date(saved.at), syncing: true, source: 'local' });
+    if (saved && saved.views) { this.setState({ mode: 'live', data: saved.views, email: saved.email, notice: null, updatedAt: new Date(saved.at), syncing: true, source: 'local' }); tm.first_ms = ms(); }
     else this.setState({ mode: 'loading', notice: null, syncing: false, source: cached ? 'cache' : 'views' });
     try {
       const tk = await this.token();
@@ -162,6 +165,7 @@ class App {
           const user = await userP;
           if (!current()) return;
           await this.showDash(dash, aud, tk, user, true, current);
+          tm.data_ms = ms(); if (tm.first_ms == null) tm.first_ms = tm.data_ms; tm.kb = dash._kb;
           const r = await refreshCache(tk).catch(() => null);
           if (!current()) return;
           if (r && r.status === 'ok') dash = await fetchDashboard(tk, aud);
@@ -173,10 +177,13 @@ class App {
             if (sys && r && r.checked_at) sys.checked_at = r.checked_at;
             this.setState({ syncing: false });
           }
+          tm.total_ms = ms(); tm.refresh = r ? r.status : 'error';
+          logLoad(tk, tm);
           return;
         }
       }
       await this.loadViews(tk, userP, current);
+      if (current() && this.state.mode === 'live') { tm.first_ms = tm.data_ms = tm.total_ms = ms(); logLoad(tk, tm); }
     } catch (e) {
       if (!current()) return;
       if (e.code === 401) localStorage.removeItem(LS_SESSION);
@@ -266,7 +273,10 @@ class App {
     }
     const used = sys && sys.db_limit_bytes ? Math.min(100, (num(sys.db_bytes) / num(sys.db_limit_bytes)) * 100) : null;
     const db = used != null ? `<span class="ds-db" title="Base de analítica en Supabase: ${esc(MB(sys.db_bytes))} de ${esc(MB(sys.db_limit_bytes))}. Crece ~${esc(MB(num(sys.growth_per_day) * 30))} al mes.">Base ${esc(MB(sys.db_bytes))} de ${esc(MB(sys.db_limit_bytes))}<i class="ds-bar"><b style="width:${Math.max(2, used).toFixed(1)}%;background:${used >= 80 ? 'var(--neg)' : 'var(--c-blue)'}"></b></i>${esc(P(r1(used)))}</span>` : '';
-    return `<div class="datasrc anim" style="--i:1" role="status"><span class="ds-main"><span class="dot" style="background:${dot}"></span><b>${esc(head)}</b><span>${esc(how)}</span></span>${bits.map((b) => `<span class="ds-bit">${esc(b)}</span>`).join('')}${db}</div>`;
+    // Lo que la sección Sistema marca para revisar (sin contar las copias, que es fijo en el plan Free).
+    const flagged = sys && sys.detail ? sysChecks(sys, limaToday()).filter((c) => c.key !== 'backup' && (c.state === 'bad' || c.state === 'warn')) : [];
+    const link = sec.id === 'resumen' ? `<button class="ds-link${flagged.length ? ' warn' : ''}" data-act="go" data-id="sistema">${flagged.length ? esc(flagged.length + ' por revisar en Sistema') : 'Ver Sistema'}</button>` : '';
+    return `<div class="datasrc anim" style="--i:1" role="status"><span class="ds-main"><span class="dot" style="background:${dot}"></span><b>${esc(head)}</b><span>${esc(how)}</span></span>${bits.map((b) => `<span class="ds-bit">${esc(b)}</span>`).join('')}${db}${link}</div>`;
   }
 
   // Por qué llegaron vacías todas las vistas: ¿no es administrador, o sólo
@@ -839,9 +849,10 @@ const SEC_GROUPS = [
   { label: 'Uso del producto', ids: ['activacion', 'uso', 'adopcion'] },
   { label: 'Correo y clasificación', ids: ['correo', 'clasificacion', 'comercios', 'monitoreo', 'suscripciones'] },
   { label: 'Negocio y calidad', ids: ['pro', 'calidad', 'versiones'] },
+  { label: 'Panel', ids: ['sistema'] },
 ];
 // Ícono de cada sección en el menú lateral.
-const SEC_ICON = { resumen: 'chart', hipotesis: 'target', testers: 'users', bitacora: 'calendar', activacion: 'trend', uso: 'activity', adopcion: 'sliders', correo: 'mail', clasificacion: 'tag', comercios: 'store', monitoreo: 'eye', suscripciones: 'repeat', pro: 'star', calidad: 'zap', versiones: 'layers' };
+const SEC_ICON = { resumen: 'chart', hipotesis: 'target', testers: 'users', bitacora: 'calendar', activacion: 'trend', uso: 'activity', adopcion: 'sliders', correo: 'mail', clasificacion: 'tag', comercios: 'store', monitoreo: 'eye', suscripciones: 'repeat', pro: 'star', calidad: 'zap', versiones: 'layers', sistema: 'refresh' };
 function renderSecMenu(cur, q) {
   return `<div class="sm-head">${svg('search', 18)}<input type="search" data-sq value="${esc(q)}" placeholder="Busca una sección: retención, comercios, versiones…" aria-label="Buscar sección"><kbd>Esc</kbd></div><div class="sm-list" data-smlist>${secMenuList(cur, q)}</div>`;
 }

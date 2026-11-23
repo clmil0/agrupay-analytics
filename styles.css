@@ -66,6 +66,9 @@ h1{margin:0;font-size:clamp(34px,4.2vw,48px);line-height:1;font-weight:500;lette
 .ds-db{display:inline-flex;align-items:center;gap:8px;margin-left:auto;font-variant-numeric:tabular-nums;white-space:nowrap;}
 .ds-bar{display:inline-block;width:72px;height:6px;border-radius:3px;background:var(--sep2);overflow:hidden;}
 .ds-bar b{display:block;height:100%;border-radius:3px;}
+.ds-link{border:1px solid var(--sep2);background:transparent;color:var(--text);font:inherit;font-size:12.5px;padding:4px 12px;border-radius:999px;cursor:pointer;white-space:nowrap;}
+.ds-link:hover{background:var(--sep2);}
+.ds-link.warn{border-color:var(--c-orange);color:var(--c-orange);}
 @media (max-width:899px){.datasrc{gap:4px 12px;padding:10px 14px;font-size:12.5px;}.ds-db{margin-left:0;}}
 
 .kpis{display:flex;flex-wrap:wrap;gap:16px 40px;align-items:center;}

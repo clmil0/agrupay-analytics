@@ -209,6 +209,22 @@ const GUIDE = {
       { t: 'En App Store', d: 'Parte de las instalaciones que usan la versión pública.' },
     ],
   },
+  sistema: {
+    intro: 'Si los datos llegan y se procesan bien, qué tan rápido carga el panel y cuánto espacio queda en la base.',
+    how: ['Mira primero los Chequeos: en naranja, lo que hay que revisar. «Falla» es urgente; «Revisar» puede esperar.', 'Si «Último evento recibido» es de hace muchas horas en pleno día, la app dejó de enviar: revisa la última versión publicada.', 'El tiempo de carga sirve para mostrar el efecto de los cambios al panel: anótalos en la Bitácora como «Cambio en el panel o la analítica».'],
+    terms: [
+      { t: 'Estado', d: 'Cuántos chequeos están en «Falla» o «Revisar». «Todo bien» si ninguno.' },
+      { t: 'Última revisión', d: 'La última vez que Supabase buscó eventos nuevos para la caché. Pasa cada 5 minutos (pg_cron) y cada vez que alguien abre el panel.' },
+      { t: 'Último evento recibido', d: 'Cuándo llegó a Supabase el último lote de eventos de la app, de cualquier instalación.' },
+      { t: 'Eventos hoy', d: 'Eventos recibidos desde la medianoche de Lima, sin el simulador, y cuántas instalaciones los mandaron.' },
+      { t: 'Carga del panel', d: 'Mediana de los últimos 7 días del tiempo hasta ver los datos de Supabase, medido en el navegador de quien abre el panel. No se guarda quién fue.' },
+      { t: 'Espacio usado', d: 'Lo que ocupa la base de analítica contra el límite del plan de Supabase (500 MB en el plan Free).' },
+      { t: 'Retraso de los eventos', d: 'Tiempo entre que algo pasa en la app y que el evento llega a Supabase. La app manda lo pendiente cuando se abre, así que lo de la noche suele llegar a la mañana. Mientras tanto, el panel no lo ve.' },
+      { t: 'Actualización automática', d: 'La tarea de pg_cron que pone al día la caché cada 5 minutos. «Falla» si alguna pasada falló en 24 h o si la última fue hace más de 15 minutos.' },
+      { t: 'Pasada completa', d: 'Rehace las vistas que dependen de «hoy» (últimos 30 días, cohortes). Pasa como mucho cada 15 minutos cuando hay eventos nuevos, o cada hora.' },
+      { t: 'Copias de seguridad', d: 'El plan Free de Supabase no guarda copias. Se resuelve con el plan Pro (copia diaria) o con una copia semanal automática.' },
+    ],
+  },
 };
 
 // Definición de un término, para el título de los KPI.

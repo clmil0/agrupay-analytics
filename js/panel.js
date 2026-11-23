@@ -24,6 +24,7 @@ const SECTIONS = [
   { id: 'calidad', label: 'Calidad', desc: 'Arranque, crashes, cuelgues, errores y Face ID.' },
   { id: 'adopcion', label: 'Adopción de ajustes', desc: 'Última foto diaria de cada instalación en los últimos 14 días.', fixed: true },
   { id: 'versiones', label: 'Versiones', desc: 'Versiones en uso en los últimos 7 días.', fixed: true },
+  { id: 'sistema', label: 'Sistema', desc: 'Que los datos lleguen y se procesen: actualizaciones automáticas, llegada de eventos, velocidad del panel y espacio en la base.', fixed: true, noAud: true },
 ];
 
 const LBL = {
@@ -55,6 +56,11 @@ const LBL = {
 const lab = (d, k) => (k == null ? '—' : (LBL[d] && LBL[d][k]) || k);
 
 const limaToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima' }).format(new Date());
+// Día y hora de Lima de un instante: «2026-11-23» y «2026-11-23T14».
+const limaDay = (t) => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima' }).format(new Date(t));
+const limaHour = (t) => { const p = Object.fromEntries(new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Lima', year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', hourCycle: 'h23' }).formatToParts(new Date(t)).map((x) => [x.type, x.value])); return p.year + '-' + p.month + '-' + p.day + 'T' + p.hour; };
+// Hace cuánto: «hace 5 min», «hace 3 h», «hace 2 d».
+const AGO = (t) => { if (!t) return '—'; const m = Math.max(0, (Date.now() - new Date(t)) / 60000); return m < 1 ? 'recién' : m < 60 ? 'hace ' + Math.round(m) + ' min' : m < 48 * 60 ? 'hace ' + nf.format(Math.round(m / 6) / 10) + ' h' : 'hace ' + Math.round(m / 1440) + ' d'; };
 const addD = (s, n) => { const d = new Date(s + 'T00:00:00Z'); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
 const monday = (s) => { const d = new Date(s + 'T00:00:00Z'); return addD(s, -((d.getUTCDay() + 6) % 7)); };
 const MES = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic'];
@@ -297,6 +303,18 @@ function makeDemo() {
     db_bytes: 41 * MBb, db_limit_bytes: 500 * MBb, events_bytes: 22 * MBb, cache_bytes: 6 * MBb, events_total: 49700, events_per_day: 940, bytes_per_event: 442,
     growth_per_day: 0.53 * MBb, growth_measured: false, days_to_full: 866, cron_failed_24h: 0,
     history: Array.from({ length: 30 }, (_, i) => ({ day: addD(today, i - 29), db_bytes: Math.round((25.5 + i * 0.53) * MBb), events: 30000 + i * 940 })),
+    cron_last: { at: new Date(Date.now() - 2 * 60000).toISOString(), status: 'succeeded' },
+  };
+  // Detalle de la sección Sistema (v28), con la forma de analytics_system_detail().
+  const hNow = Date.now();
+  D._system.detail = {
+    hourly: Array.from({ length: 48 }, (_, i) => { const k = limaHour(hNow - (47 - i) * 3600e3); const h = +k.slice(11, 13); const n = h >= 1 && h < 7 ? 0 : Math.round((h >= 19 ? 70 : 35) * (0.5 + r())); return { h: k, events: n, installs: n ? Math.max(1, Math.round(n / 9)) : 0 }; }),
+    daily: Array.from({ length: 30 }, (_, i) => ({ day: addD(today, i - 29), events: Math.round(940 * (0.7 + r() * 0.6)), installs: Math.round(9 * (0.7 + r() * 0.6)) })),
+    latency: { p50_min: 42, p90_min: 610, pct_over_1h: 38 },
+    last_event_at: new Date(hNow - 6 * 60000).toISOString(), today_events: 512, today_installs: 8,
+    cron_24h: { runs: 288, failed: 0, avg_ms: 35 },
+    refresh_log: Array.from({ length: 12 }, (_, i) => ({ at: new Date(hNow - (i * 25 + 3) * 60000).toISOString(), origin: i % 4 === 1 ? 'panel' : 'auto', status: 'ok', events: Math.round(5 + r() * 40), from_day: today, incremental: 92, full_views: i % 3 === 0 ? 68 : 0, ms: Math.round(i % 3 === 0 ? 2400 + r() * 600 : 300 + r() * 400) })),
+    loads: Array.from({ length: 40 }, (_, i) => { const at = new Date(hNow - i * 17 * 3600e3 * r()); const local = r() < 0.6; const data = Math.round(700 + r() * 900); return { at: at.toISOString(), source: 'cache', aud: 'all', first_ms: local ? Math.round(40 + r() * 40) : data, data_ms: data, total_ms: data + Math.round(200 + r() * 300), kb: 1780, refresh: r() < 0.5 ? 'ok' : 'fresh' }; }),
   };
   return D;
 }
@@ -371,7 +389,15 @@ async function fetchDashboard(token, aud) {
   const res = await fetch(SB_URL + '/rest/v1/rpc/analytics_dashboard', { method: 'POST', headers: { apikey: SB_KEY, Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ p_aud: aud }) });
   if (res.status === 401) { const e = new Error('Sesión vencida'); e.code = 401; throw e; }
   if (!res.ok) { console.warn('analytics_dashboard respondió ' + res.status + '; se leen las vistas una por una.'); return null; }
-  return res.json();
+  const txt = await res.text();
+  const j = JSON.parse(txt);
+  j._kb = Math.round(txt.length / 1024);
+  return j;
+}
+
+// v28: guarda cuánto tardó esta carga del panel (sin quién). Si falla, no pasa nada.
+function logLoad(token, p) {
+  fetch(SB_URL + '/rest/v1/rpc/analytics_log_load', { method: 'POST', headers: { apikey: SB_KEY, Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ p }) }).catch(() => {});
 }
 
 // v27: cómo se están leyendo los datos y cuánto ocupa la base. null sin v27.
@@ -788,12 +814,122 @@ async function deleteMilestone(id, token) {
   if (!res.ok) throw new Error('analytics_milestones respondió ' + res.status);
 }
 
+// ── Sistema (v27 y v28) ──────────────────────────────────────────────────
+// Espacio de la base de analítica: cuánto ocupa, a qué ritmo crece y cuándo se llenaría.
+function spaceCard(ctx, sys, size) {
+  const hist = Array.isArray(sys.history) ? sys.history : [];
+  const hm = new Map(hist.map((x) => [String(x.day).slice(0, 10), x]));
+  const used = sys.db_limit_bytes ? (num(sys.db_bytes) / num(sys.db_limit_bytes)) * 100 : null;
+  const MBv = (v) => nf.format(Math.round(v * 10) / 10) + ' MB';
+  return bars(ctx, {
+    id: 'db-space', area: true, size, tone: used >= 80 ? 'orange' : '', title: 'Espacio en la base de analítica',
+    sub: 'Lo que ocupa en Supabase, día por día. Límite del plan: ' + MB(sys.db_limit_bytes) + '.', meta: 'se mide cada ' + (sys.schedule_min || 5) + ' min',
+    big: MB(sys.db_bytes), bigSub: P(r1(used)) + ' del límite · crece ' + MB(num(sys.growth_per_day) * 30) + ' al mes' + (sys.growth_measured ? '' : ' (estimado)') + ' · se llenaría hacia ' + fullWhen(sys, ctx.today),
+    keys: hist.map((x) => String(x.day).slice(0, 10)), xlab: fd, fmt: MBv, klabel: 'Día',
+    tipFn: (d) => { const x = hm.get(d); return fd(d) + ' · ' + MB(x && x.db_bytes) + ' · ' + N(x && x.events) + ' eventos guardados'; },
+    series: [{ label: 'Tamaño', c: COL.blue, get: (d) => num(hm.get(d) && hm.get(d).db_bytes) / 1024 / 1024 }],
+    detail: table({ id: 'db-space-d', show: Infinity, cols: [{ label: 'Día', align: 'left', w: 'minmax(96px,1.3fr)' }, { label: 'Tamaño', bar: true }, { label: 'Eventos guardados' }], rows: hist.slice().reverse().map((x) => [{ v: fd(x.day), fw: 500 }, { v: MB(x.db_bytes), n: num(x.db_bytes) }, N(x.events)]) }),
+  });
+}
+// «mayo de 2029»: el mes en que se llenaría la base al ritmo actual.
+function fullWhen(sys, T) {
+  if (!ok(sys.days_to_full)) return '—';
+  const d = addD(T, Math.min(+sys.days_to_full, 3650));
+  return MESL[+d.slice(5, 7) - 1] + ' de ' + d.slice(0, 4);
+}
+const quant = (xs, q) => { const s = xs.filter(ok).map(Number).sort((a, b) => a - b); if (!s.length) return null; const i = (s.length - 1) * q, lo = Math.floor(i); return s[lo] + (s[Math.ceil(i)] - s[lo]) * (i - lo); };
+// Lo que el panel revisa solo. state: ok, warn (revisar) o bad (falla).
+function sysChecks(sys, T) {
+  const det = sys.detail || {};
+  const out = [];
+  const mins = (t) => (t ? (Date.now() - new Date(t)) / 60000 : Infinity);
+  const cron = det.cron_24h || {};
+  const lastRun = sys.cron_last && sys.cron_last.at;
+  const cronState = num(cron.failed) > 0 || num(sys.cron_failed_24h) > 0 || (sys.cron_last && sys.cron_last.status !== 'succeeded') ? 'bad' : mins(lastRun) > 15 ? 'bad' : 'ok';
+  out.push({ key: 'cron', state: cronState, title: 'Actualización automática', value: N(cron.runs) + ' pasadas', foot: 'en 24 h · ' + N(num(cron.failed)) + ' fallas', sub: cronState === 'ok' ? 'pg_cron revisa cada ' + (sys.schedule_min || 5) + ' min. Última: ' + AGO(lastRun) + '.' : lastRun ? 'La última corrió ' + AGO(lastRun) + (sys.cron_last.status !== 'succeeded' ? ' y falló' : '') + '. Revisa cron.job_run_details en Supabase.' : 'No hay registro de pg_cron. ¿Se corrió v26?' });
+  const evM = mins(det.last_event_at);
+  const evState = evM < 6 * 60 ? 'ok' : evM < 24 * 60 ? 'warn' : 'bad';
+  out.push({ key: 'ingest', state: evState, title: 'Llegada de eventos', value: AGO(det.last_event_at), foot: 'último lote · ' + N(det.today_events) + ' eventos hoy', sub: evState === 'ok' ? N(det.today_installs) + ' instalaciones enviaron datos hoy.' : 'Puede ser normal de madrugada. Si sigue así de día, la app no está enviando: revisa la última versión.' });
+  const lat = det.latency || {};
+  const p50h = ok(lat.p50_min) ? lat.p50_min / 60 : null;
+  const latState = p50h == null ? 'none' : p50h < 6 ? 'ok' : p50h < 24 ? 'warn' : 'bad';
+  out.push({ key: 'latency', state: latState, title: 'Retraso de los eventos', value: FH(p50h), foot: 'mediana · p90 ' + FH(ok(lat.p90_min) ? lat.p90_min / 60 : null), sub: P(lat.pct_over_1h) + ' llega con más de 1 h de retraso (7 días): la app manda lo pendiente cuando se vuelve a abrir. Hasta entonces, el panel no lo ve.' });
+  const used = sys.db_limit_bytes ? (num(sys.db_bytes) / num(sys.db_limit_bytes)) * 100 : null;
+  const spState = used == null ? 'none' : used < 70 ? 'ok' : used < 85 ? 'warn' : 'bad';
+  out.push({ key: 'space', state: spState, title: 'Espacio en la base', value: P(r1(used)), foot: MB(sys.db_bytes) + ' de ' + MB(sys.db_limit_bytes), sub: 'Crece ' + MB(num(sys.growth_per_day) * 30) + ' al mes; se llenaría hacia ' + fullWhen(sys, T) + '.' });
+  const loads = (det.loads || []).filter((l) => mins(l.at) < 7 * 1440);
+  const p50 = quant(loads.map((l) => l.data_ms), 0.5);
+  const ldState = p50 == null ? 'none' : p50 < 3000 ? 'ok' : p50 < 6000 ? 'warn' : 'bad';
+  out.push({ key: 'speed', state: ldState, title: 'Velocidad del panel', value: p50 == null ? 'Sin datos' : MS(p50), foot: p50 == null ? 'se mide en cada visita' : 'mediana 7 días · ' + N(loads.length) + ' visitas', sub: 'Hasta ver los datos de Supabase en el navegador. Antes de v26 cada visita pedía ~58 consultas de 0,6 a 4,4 s cada una.' });
+  out.push({ key: 'backup', state: 'warn', title: 'Copias de seguridad', value: 'Ninguna', foot: 'plan Free de Supabase', sub: 'Supabase no guarda copias en el plan Free. Opciones: plan Pro (US$25/mes, copia diaria) o una copia semanal automática.' });
+  return out;
+}
+const CHK = { ok: { kicker: 'Bien', tone: 'dark' }, warn: { kicker: 'Revisar', tone: 'orange' }, bad: { kicker: 'Falla', tone: 'orange' }, none: { kicker: 'Sin datos', tone: 'dark' } };
+
+function sistema(ctx) {
+  const T = ctx.today, sys = ctx.D._system;
+  if (!sys) return { kpis: [], cards: [tiles({ id: 'checks', wide: true, title: 'Sin datos del sistema', sub: 'Corre sql/altanto_analytics_v27_sistema.sql y v28_monitoreo.sql en Supabase y toca Actualizar.', items: [] })] };
+  const det = sys.detail || {};
+  const checks = sysChecks(sys, T);
+  const bad = checks.filter((c) => c.state === 'bad').length, warn = checks.filter((c) => c.state === 'warn').length;
+  // Últimas 48 horas y últimos 30 días, aunque no haya llegado nada.
+  const hk = Array.from({ length: 48 }, (_, i) => limaHour(Date.now() - (47 - i) * 3600e3));
+  const hm = new Map((det.hourly || []).map((x) => [x.h, x]));
+  const hl = (k) => fd(k.slice(0, 10)) + ' ' + k.slice(11, 13) + ':00';
+  const dk = Array.from({ length: 30 }, (_, i) => addD(T, i - 29));
+  const dm = new Map((det.daily || []).map((x) => [String(x.day).slice(0, 10), x]));
+  const loads = det.loads || [];
+  const ld = new Map();
+  loads.forEach((l) => { const d = limaDay(l.at); (ld.get(d) || ld.set(d, []).get(d)).push(l); });
+  const ldq = (d, q) => { const xs = ld.get(d); return xs ? quant(xs.map((l) => l.data_ms), q) : null; };
+  const p50_7 = quant(loads.filter((l) => Date.now() - new Date(l.at) < 7 * 864e5).map((l) => l.data_ms), 0.5);
+  const local = loads.filter((l) => ok(l.first_ms) && ok(l.data_ms) && l.first_ms < l.data_ms);
+  const log = det.refresh_log || [];
+  const ORG = { auto: 'Automática', panel: 'Desde el panel' };
+  return {
+    kpis: [
+      kpi('Estado', bad ? N(bad) + ' con falla' : warn ? N(warn) + ' por revisar' : 'Todo bien', bad + warn ? checks.filter((c) => c.state === 'bad' || c.state === 'warn').map((c) => c.title).join(' · ') : 'todos los chequeos', bad ? 'var(--neg)' : warn ? 'var(--c-orange)' : 'var(--pos)'),
+      kpi('Última revisión', HM(sys.checked_at || sys.refreshed_at), AGO(sys.checked_at || sys.refreshed_at) + ' · cada ' + (sys.schedule_min || 5) + ' min'),
+      kpi('Último evento recibido', AGO(det.last_event_at), HM(det.last_event_at)),
+      kpi('Eventos hoy', N(det.today_events), N(det.today_installs) + ' instalaciones enviaron'),
+      kpi('Carga del panel', p50_7 == null ? '—' : MS(p50_7), 'mediana 7 días'),
+      kpi('Espacio usado', P(r1(sys.db_limit_bytes ? (num(sys.db_bytes) / num(sys.db_limit_bytes)) * 100 : null)), MB(sys.db_bytes) + ' de ' + MB(sys.db_limit_bytes)),
+    ],
+    cards: [
+      tiles({ id: 'checks', wide: true, title: 'Chequeos', sub: 'Lo que el panel revisa solo cada vez que se abre. En naranja, lo que hay que mirar.', meta: N(checks.length) + ' chequeos',
+        items: checks.map((c) => ({ kicker: CHK[c.state].kicker, title: c.title, sub: c.sub, value: c.value, foot: c.foot, tone: CHK[c.state].tone })),
+        detail: table({ id: 'checks-d', show: Infinity, minW: '560px', cols: [{ label: 'Chequeo', align: 'left', w: 'minmax(150px,1.2fr)' }, { label: 'Estado', align: 'left' }, { label: 'Valor' }, { label: 'Qué quiere decir', align: 'left', w: 'minmax(220px,2.6fr)' }], rows: checks.map((c) => [{ v: c.title, fw: 500 }, { v: CHK[c.state].kicker, color: c.state === 'bad' ? 'var(--neg)' : c.state === 'warn' ? 'var(--c-orange)' : 'var(--text)' }, c.value, c.sub]) }) }),
+      bars(ctx, { id: 'ingest-hour', size: 'lg', title: 'Eventos recibidos por hora', sub: 'Últimas 48 horas, hora de Lima. Cada barra es lo que llegó de la app en esa hora.', meta: '48 h', big: N(hk.reduce((a, k) => a + num(hm.get(k) && hm.get(k).events), 0)), bigSub: 'eventos en 48 h', klabel: 'Hora', keys: hk, xlab: hl,
+        tipFn: (k) => { const x = hm.get(k); return hl(k) + ' · ' + N(x ? x.events : 0) + ' eventos · ' + N(x ? x.installs : 0) + ' instalaciones'; },
+        series: [{ label: 'Eventos', c: COL.blue, get: (k) => num(hm.get(k) && hm.get(k).events) }] }),
+      rank({ id: 'latency', size: 'sm', title: 'Retraso de los eventos', sub: 'De que pasa algo en la app a que llega aquí. Últimos 7 días.', fmt: (v) => FH(v / 60), sort: false,
+        items: [{ label: 'Mediana', value: num(det.latency && det.latency.p50_min), c: COL.ink }, { label: 'p90', value: num(det.latency && det.latency.p90_min), c: COL.a }],
+        detail: null }),
+      bars(ctx, { id: 'ingest-day', title: 'Eventos recibidos por día', sub: 'Últimos 30 días. Si un día cae mucho sin razón, la app dejó de enviar.', meta: '30 días', keys: dk, xlab: fd,
+        tipFn: (d) => { const x = dm.get(d); return fd(d) + ' · ' + N(x ? x.events : 0) + ' eventos · ' + N(x ? x.installs : 0) + ' instalaciones'; },
+        series: [{ label: 'Eventos', c: COL.ink, get: (d) => num(dm.get(d) && dm.get(d).events) }],
+        detail: table({ id: 'ingest-day-d', show: Infinity, cols: [{ label: 'Día', align: 'left', w: 'minmax(96px,1.3fr)' }, { label: 'Eventos', bar: true }, { label: 'Instalaciones' }], rows: dk.slice().reverse().map((d) => { const x = dm.get(d); return [{ v: fd(d), fw: 500 }, nc(x ? x.events : 0), N(x ? x.installs : 0)]; }) }) }),
+      bars(ctx, { id: 'panel-load', title: 'Tiempo de carga del panel', sub: 'Mediana por día hasta ver los datos de Supabase, medida en el navegador de cada administrador (sin guardar quién).', meta: N(loads.length) + ' visitas', fmt: MS, keys: dk, xlab: fd,
+        big: p50_7 == null ? '' : MS(p50_7), bigSub: p50_7 == null ? '' : 'mediana 7 días' + (local.length ? ' · con lo guardado en el navegador, ' + MS(quant(local.map((l) => l.first_ms), 0.5)) : ''),
+        tipFn: (d) => (ld.get(d) ? fd(d) + ' · ' + N(ld.get(d).length) + ' visitas · p50 ' + MS(ldq(d, 0.5)) + ' · p90 ' + MS(ldq(d, 0.9)) : fd(d) + ' · sin visitas'),
+        series: [{ label: 'Mediana', c: COL.green, get: (d) => num(ldq(d, 0.5)) }],
+        detail: table({ id: 'panel-load-d', show: Infinity, minW: '560px', cols: [{ label: 'Cuándo', align: 'left', w: 'minmax(110px,1.3fr)' }, { label: 'Primer dato' }, { label: 'De Supabase', bar: true }, { label: 'Al día' }, { label: 'Tamaño' }, { label: 'Actualización', align: 'left' }],
+          rows: loads.map((l) => [{ v: fd(limaDay(l.at)) + ' ' + HM(l.at), fw: 500 }, MS(l.first_ms), { v: MS(l.data_ms), n: num(l.data_ms) }, MS(l.total_ms), ok(l.kb) ? N(l.kb) + ' KB' : '—', l.refresh === 'ok' ? 'procesó eventos nuevos' : l.refresh === 'fresh' ? 'no había nada nuevo' : l.refresh || '—']) }) }),
+      spaceCard(ctx, sys),
+      table({ id: 'refresh-log', wide: true, title: 'Últimas actualizaciones de la caché', sub: 'Cada vez que Supabase procesó eventos nuevos. «Desde» es el primer día que recalculó; las completas rehacen lo de 30 días y las cohortes.', meta: '30 días',
+        cols: [{ label: 'Cuándo', align: 'left', w: 'minmax(110px,1.3fr)' }, { label: 'Origen', align: 'left' }, { label: 'Eventos nuevos', bar: true }, { label: 'Desde' }, { label: 'Tipo', align: 'left' }, { label: 'Duración' }], minW: '560px', show: 8,
+        rows: log.map((x) => [{ v: fd(limaDay(x.at)) + ' ' + HM(x.at), fw: 500 }, ORG[x.origin] || x.origin, nc(x.events), x.from_day ? fd(x.from_day) : '—', num(x.full_views) ? 'Completa' : 'Sólo lo nuevo', MS(x.ms)]) }),
+    ],
+  };
+}
+
 function build(id, ctx) {
   const D = ctx.D, st = ctx.start, days = ctx.days, R = ctx.range, T = ctx.today;
   const perDay = (rows, f) => { const m = group(rows, (x) => String(x.day).slice(0, 10), f); return (d) => m.get(d) || 0; };
   R_END = ctx.end || null;
   R_PICK = ctx.pick && ctx.pick.size ? ctx.pick : null;
   if (id === 'bitacora') return bitacora(ctx);
+  if (id === 'sistema') return sistema(ctx);
   const surveyed = (p) => ['s_matches', 's_min_after', 's_replaced', 's_pay', 's_fatal', 's_recommended'].some((k) => p.s[k] != null && p.s[k] !== '');
 
   if (id === 'hipotesis') {
@@ -883,23 +1019,7 @@ function build(id, ctx) {
     const hours = new Map((D.analytics_open_hours_30d || []).map((x) => [num(x.hour), num(x.opens)]));
     const peak = [...hours.entries()].sort((a, b) => b[1] - a[1])[0];
     const dv = (d, k) => num(dam.get(d) && dam.get(d)[k]);
-    // Espacio de la base de analítica (v27): cuánto ocupa, a qué ritmo crece y cuándo se llenaría.
-    const sys = D._system;
-    const hist = sys && Array.isArray(sys.history) ? sys.history : [];
-    const hm = new Map(hist.map((x) => [String(x.day).slice(0, 10), x]));
-    const used = sys && sys.db_limit_bytes ? (num(sys.db_bytes) / num(sys.db_limit_bytes)) * 100 : null;
-    const fullDay = sys && ok(sys.days_to_full) ? addD(T, Math.min(+sys.days_to_full, 3650)) : null;
-    const fullTxt = fullDay ? MESL[+fullDay.slice(5, 7) - 1] + ' de ' + fullDay.slice(0, 4) : '—';
-    const MBv = (v) => nf.format(Math.round(v * 10) / 10) + ' MB';
-    const space = sys ? [bars(ctx, {
-      id: 'db-space', area: true, tone: used >= 80 ? 'orange' : '', title: 'Espacio en la base de analítica',
-      sub: 'Lo que ocupa en Supabase, día por día. Límite del plan: ' + MB(sys.db_limit_bytes) + '.', meta: 'se mide cada ' + (sys.schedule_min || 5) + ' min',
-      big: MB(sys.db_bytes), bigSub: P(r1(used)) + ' del límite · crece ' + MB(num(sys.growth_per_day) * 30) + ' al mes' + (sys.growth_measured ? '' : ' (estimado)') + ' · se llenaría hacia ' + fullTxt,
-      keys: hist.map((x) => String(x.day).slice(0, 10)), xlab: fd, fmt: MBv, klabel: 'Día',
-      tipFn: (d) => { const x = hm.get(d); return fd(d) + ' · ' + MB(x && x.db_bytes) + ' · ' + N(x && x.events) + ' eventos guardados'; },
-      series: [{ label: 'Tamaño', c: COL.blue, get: (d) => num(hm.get(d) && hm.get(d).db_bytes) / 1024 / 1024 }],
-      detail: table({ id: 'db-space-d', show: Infinity, cols: [{ label: 'Día', align: 'left', w: 'minmax(96px,1.3fr)' }, { label: 'Tamaño', bar: true }, { label: 'Eventos guardados' }], rows: hist.slice().reverse().map((x) => [{ v: fd(x.day), fw: 500 }, { v: MB(x.db_bytes), n: num(x.db_bytes) }, N(x.events)]) }),
-    })] : [];
+    const space = D._system ? [spaceCard(ctx, D._system)] : [];
     return {
       kpis: [
         kpi('DAU', N(last && last.active_installs), last ? fd(lastDay) + ' · promedio ' + N0(avg) : '—'),
