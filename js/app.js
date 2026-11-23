@@ -137,51 +137,100 @@ class App {
     return s.access_token;
   }
 
+  // Sin personas elegidas, el panel sale de la caché que Supabase mantiene al día
+  // (v26): primero lo guardado en este navegador, al instante; luego una sola
+  // llamada a analytics_dashboard; al final analytics_refresh procesa sólo los
+  // eventos nuevos y, si cambió algo, se vuelve a pedir. Con personas elegidas
+  // (o sin v26) se leen las vistas una por una, como antes.
   async load() {
     if (this.forceDemo || !this.session()) { this.setState({ mode: 'demo', data: null, email: null }); return; }
-    this.setState({ mode: 'loading', notice: null });
+    const seq = (this.loadSeq = (this.loadSeq || 0) + 1);
+    const current = () => seq === this.loadSeq;
+    const aud = this.state.aud;
+    const cached = !this.state.pick.length;
+    const saved = cached ? await idbGet('dash:' + aud) : null;
+    if (!current()) return;
+    if (saved && saved.views) this.setState({ mode: 'live', data: saved.views, email: saved.email, notice: null, updatedAt: new Date(saved.at), syncing: true });
+    else this.setState({ mode: 'loading', notice: null, syncing: false });
     try {
       const tk = await this.token();
       if (!tk) throw Object.assign(new Error('Sesión vencida'), { code: 401 });
-      const today = limaToday();
-      // Personas elegidas: mandan sobre Testers / No testers.
-      const aud = this.state.pick.length ? { ids: this.state.pick } : this.state.aud;
-      // [vista, filtro, audiencia]: las de personas (v22) van sin audiencia.
-      const jobs = [];
-      DAILY.forEach((v) => jobs.push([v, 'day=gte.' + addD(today, -89) + '&order=day.asc', aud]));
-      jobs.push(['analytics_weekly_active', 'week=gte.' + monday(addD(today, -7 * 12)), aud]);
-      jobs.push(['analytics_monthly_active', 'month=gte.' + addD(today, -100), aud]);
-      jobs.push(['analytics_onboarding_funnel', 'cohort_week=gte.' + monday(addD(today, -7 * 16)), aud]);
-      jobs.push(['analytics_retention_cohorts', 'cohort_week=gte.' + monday(addD(today, -7 * 16)), aud]);
-      FLAT.forEach((v) => jobs.push([v, '', aud]));
-      jobs.push(['analytics_install_daily', 'day=gte.' + addD(today, -89) + '&order=day.asc']);
-      jobs.push(['analytics_install_profile', '']);
-      jobs.push(['analytics_testers', '']);
-      jobs.push(['analytics_milestones', 'order=day.asc']);
-      jobs.push(['analytics_app_releases', '']);
-      jobs.push(['analytics_merchant_person_daily', 'day=gte.' + addD(today, -89) + '&order=day.asc']);
       const userP = fetch(SB_URL + '/auth/v1/user', { headers: { apikey: SB_KEY, Authorization: 'Bearer ' + tk } }).then((r) => (r.ok ? r.json() : {})).catch(() => ({}));
-      const failed = [];
-      const res = await Promise.all(jobs.map(([v, f, a]) => fetchView(v, f, tk, a).catch((e) => { if (e.code === 401) throw e; failed.push(v); return []; })));
-      const data = {};
-      jobs.forEach(([v], i) => (data[v] = res[i]));
-      const user = await userP;
-      const empty = jobs.every(([v], i) => V22.includes(v) || V23.includes(v) || V25.includes(v) || !res[i].length);
-      if (failed.length === jobs.length) throw new Error('ninguna vista respondió. ¿Ya corriste agrupay_analytics_v16.sql?');
-      const miss21 = failed.filter((v) => V21.includes(v)), miss22 = failed.filter((v) => V22.includes(v)), miss23 = failed.filter((v) => V23.includes(v)), miss25 = failed.filter((v) => V25.includes(v)), other = failed.filter((v) => !V21.includes(v) && !V22.includes(v) && !V23.includes(v) && !V25.includes(v));
-      const parts = [];
-      if (other.length) parts.push('No se pudieron leer ' + other.length + ' vistas: ' + other.slice(0, 4).join(', ') + (other.length > 4 ? '…' : '') + '.');
-      if (miss21.length) parts.push('Faltan las vistas de comercios, hoja de clasificar y suscripciones (' + miss21.length + '). Corre agrupay_analytics_v21_merchants.sql en este proyecto y toca Actualizar.');
-      if (miss22.length) parts.push('Faltan las vistas de testers e hipótesis: corre sql/altanto_analytics_v22_testers.sql (está en este repo) y toca Actualizar.' + (aud !== 'all' ? ' Sin ella, el filtro Testers / No testers no separa nada.' : ''));
-      if (miss23.length) parts.push('Falta la vista de Monitoreo de comercios: corre sql/altanto_analytics_v23_comercios.sql (está en este repo) y toca Actualizar.');
-      if (miss25.length) parts.push('Falta la Bitácora: corre sql/altanto_analytics_v25_bitacora.sql (está en este repo) y toca Actualizar.');
-      let notice = parts.join(' ') || null;
-      if (!notice && empty) notice = this.state.pick.length ? 'Ninguna vista trae datos de las personas elegidas en este rango.' : aud !== 'all' ? 'Ninguna vista trae datos para «' + lab('aud', aud) + '». ¿Ya marcaste a los testers en la sección Testers?' : await this.diagnose(tk, user);
-      this.setState({ mode: 'live', data, email: user.email || 'sesión iniciada', notice, updatedAt: new Date() });
+      if (cached) {
+        let dash = await fetchDashboard(tk, aud);
+        if (dash) {
+          const user = await userP;
+          if (!current()) return;
+          await this.showDash(dash, aud, tk, user, true, current);
+          const r = await refreshCache(tk).catch(() => null);
+          if (!current()) return;
+          if (r && r.status === 'ok') dash = await fetchDashboard(tk, aud);
+          if (!current()) return;
+          if (r && r.status === 'ok' && dash) await this.showDash(dash, aud, tk, user, false, current);
+          else this.setState({ syncing: false });
+          return;
+        }
+      }
+      await this.loadViews(tk, userP, current);
     } catch (e) {
+      if (!current()) return;
       if (e.code === 401) localStorage.removeItem(LS_SESSION);
-      this.setState({ mode: 'demo', data: null, email: null, notice: (e.code === 401 ? 'La sesión venció. Vuelve a entrar con Google.' : 'No se pudo leer Supabase: ' + e.message) + ' Mostrando datos de ejemplo.' });
+      if (saved && e.code !== 401) { this.setState({ syncing: false, notice: 'No se pudo actualizar desde Supabase (' + e.message + '). Se muestra lo último guardado en este navegador.' }); return; }
+      this.setState({ mode: 'demo', data: null, email: null, syncing: false, notice: (e.code === 401 ? 'La sesión venció. Vuelve a entrar con Google.' : 'No se pudo leer Supabase: ' + e.message) + ' Mostrando datos de ejemplo.' });
     }
+  }
+
+  // Dibuja lo que devolvió analytics_dashboard y lo guarda en este navegador.
+  async showDash(dash, aud, tk, user, syncing, current) {
+    const data = dash.views || {};
+    const empty = Object.entries(data).every(([v, rows]) => V22.includes(v) || V23.includes(v) || V25.includes(v) || !rows || !rows.length);
+    let notice = null;
+    if (empty) notice = aud !== 'all' ? 'Ninguna vista trae datos para «' + lab('aud', aud) + '». ¿Ya marcaste a los testers en la sección Testers?' : await this.diagnose(tk, user);
+    if (!current()) return;
+    const at = dash.refreshed_at ? new Date(dash.refreshed_at) : new Date();
+    const email = user.email || 'sesión iniciada';
+    // Copia tomada antes de dibujar: el dibujo le agrega datos derivados (_people…) que no se guardan.
+    idbSet('dash:' + aud, { views: { ...data }, email, at: at.toISOString() });
+    this.setState({ mode: 'live', data, email, notice, updatedAt: at, syncing });
+  }
+
+  // Lectura vista por vista (personas elegidas, o Supabase sin v26).
+  async loadViews(tk, userP, current) {
+    const today = limaToday();
+    // Personas elegidas: mandan sobre Testers / No testers.
+    const aud = this.state.pick.length ? { ids: this.state.pick } : this.state.aud;
+    // [vista, filtro, audiencia]: las de personas (v22) van sin audiencia.
+    const jobs = [];
+    DAILY.forEach((v) => jobs.push([v, 'day=gte.' + addD(today, -89) + '&order=day.asc', aud]));
+    jobs.push(['analytics_weekly_active', 'week=gte.' + monday(addD(today, -7 * 12)), aud]);
+    jobs.push(['analytics_monthly_active', 'month=gte.' + addD(today, -100), aud]);
+    jobs.push(['analytics_onboarding_funnel', 'cohort_week=gte.' + monday(addD(today, -7 * 16)), aud]);
+    jobs.push(['analytics_retention_cohorts', 'cohort_week=gte.' + monday(addD(today, -7 * 16)), aud]);
+    FLAT.forEach((v) => jobs.push([v, '', aud]));
+    jobs.push(['analytics_install_daily', 'day=gte.' + addD(today, -89) + '&order=day.asc']);
+    jobs.push(['analytics_install_profile', '']);
+    jobs.push(['analytics_testers', '']);
+    jobs.push(['analytics_milestones', 'order=day.asc']);
+    jobs.push(['analytics_app_releases', '']);
+    jobs.push(['analytics_merchant_person_daily', 'day=gte.' + addD(today, -89) + '&order=day.asc']);
+    const failed = [];
+    const res = await Promise.all(jobs.map(([v, f, a]) => fetchView(v, f, tk, a).catch((e) => { if (e.code === 401) throw e; failed.push(v); return []; })));
+    const data = {};
+    jobs.forEach(([v], i) => (data[v] = res[i]));
+    const user = await userP;
+    const empty = jobs.every(([v], i) => V22.includes(v) || V23.includes(v) || V25.includes(v) || !res[i].length);
+    if (failed.length === jobs.length) throw new Error('ninguna vista respondió. ¿Ya corriste agrupay_analytics_v16.sql?');
+    const miss21 = failed.filter((v) => V21.includes(v)), miss22 = failed.filter((v) => V22.includes(v)), miss23 = failed.filter((v) => V23.includes(v)), miss25 = failed.filter((v) => V25.includes(v)), other = failed.filter((v) => !V21.includes(v) && !V22.includes(v) && !V23.includes(v) && !V25.includes(v));
+    const parts = [];
+    if (other.length) parts.push('No se pudieron leer ' + other.length + ' vistas: ' + other.slice(0, 4).join(', ') + (other.length > 4 ? '…' : '') + '.');
+    if (miss21.length) parts.push('Faltan las vistas de comercios, hoja de clasificar y suscripciones (' + miss21.length + '). Corre agrupay_analytics_v21_merchants.sql en este proyecto y toca Actualizar.');
+    if (miss22.length) parts.push('Faltan las vistas de testers e hipótesis: corre sql/altanto_analytics_v22_testers.sql (está en este repo) y toca Actualizar.' + (aud !== 'all' ? ' Sin ella, el filtro Testers / No testers no separa nada.' : ''));
+    if (miss23.length) parts.push('Falta la vista de Monitoreo de comercios: corre sql/altanto_analytics_v23_comercios.sql (está en este repo) y toca Actualizar.');
+    if (miss25.length) parts.push('Falta la Bitácora: corre sql/altanto_analytics_v25_bitacora.sql (está en este repo) y toca Actualizar.');
+    let notice = parts.join(' ') || null;
+    if (!notice && empty) notice = this.state.pick.length ? 'Ninguna vista trae datos de las personas elegidas en este rango.' : aud !== 'all' ? 'Ninguna vista trae datos para «' + lab('aud', aud) + '». ¿Ya marcaste a los testers en la sección Testers?' : await this.diagnose(tk, user);
+    if (!current()) return;
+    this.setState({ mode: 'live', data, email: user.email || 'sesión iniciada', notice, updatedAt: new Date(), syncing: false });
   }
 
   // Por qué llegaron vacías todas las vistas: ¿no es administrador, o sólo
@@ -212,6 +261,8 @@ class App {
     const s = this.session();
     if (s) fetch(SB_URL + '/auth/v1/logout', { method: 'POST', headers: { apikey: SB_KEY, Authorization: 'Bearer ' + s.access_token } }).catch(() => {});
     localStorage.removeItem(LS_SESSION);
+    idbClear();
+    this.loadSeq = (this.loadSeq || 0) + 1;
     this.sheet = false;
     this.setState({ mode: 'demo', data: null, email: null, notice: null, demoChosen: false });
     this.saveUI({ demo: false });
@@ -565,8 +616,8 @@ class App {
     try { built = build(sec.id, ctx); } catch (e) { console.error(e); buildError = e; built = { kpis: [], cards: [] }; }
     this.cards = new Map(built.cards.map((c) => [c.id, c]));
     const t = S.updatedAt ? S.updatedAt.toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit' }) : '';
-    const status = loading ? { dot: 'var(--c-blue)', text: 'Cargando…' } : live ? { dot: 'var(--pos)', text: S.email + (t ? ' · ' + t : '') } : { dot: 'var(--c-orange)', text: 'Datos de ejemplo' };
-    const footer = (live || loading ? 'En vivo desde las vistas analytics_* de Supabase.' : 'Datos de ejemplo con la misma forma que las vistas analytics_*. Entra con una cuenta de analytics_admins para ver los reales.') + ' Audiencia: ' + (S.pick.length ? pickCount(S.pick.length) : lab('aud', S.aud)) + '. Hora de Lima; excluye el canal debug.';
+    const status = loading ? { dot: 'var(--c-blue)', text: 'Cargando…' } : live ? { dot: S.syncing ? 'var(--c-blue)' : 'var(--pos)', text: S.email + (t ? ' · ' + t : '') + (S.syncing ? ' · actualizando…' : '') } : { dot: 'var(--c-orange)', text: 'Datos de ejemplo' };
+    const footer = (live || loading ? (S.pick.length ? 'En vivo desde las vistas analytics_* de Supabase.' : 'Desde la caché de Supabase, que procesa los eventos nuevos cada 5 minutos y al tocar Actualizar.') : 'Datos de ejemplo con la misma forma que las vistas analytics_*. Entra con una cuenta de analytics_admins para ver los reales.') + ' Audiencia: ' + (S.pick.length ? pickCount(S.pick.length) : lab('aud', S.aud)) + '. Hora de Lima; excluye el canal debug.';
     // Con los datos de ejemplo sólo las secciones por persona cambian con la audiencia.
     const audNote = !live && !loading && (S.aud !== 'all' || S.pick.length) && !PEOPLE_SECTIONS.includes(sec.id) ? 'Con los datos de ejemplo, los filtros de audiencia y de personas sólo cambian Hipótesis, Testers y Monitoreo de comercios. Con datos reales filtran todas las secciones.' : null;
     // Las animaciones de entrada sólo corren al cambiar de sección, rango, audiencia o datos.

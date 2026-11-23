@@ -350,6 +350,43 @@ async function fetchView(view, filter, token, aud) {
   return out;
 }
 
+// v26 (sql/altanto_analytics_v26_rendimiento.sql): todo el panel en una llamada,
+// desde la caché que Supabase mantiene al día. `aud`: 'all', 'testers' u 'others'.
+// Devuelve null si no se puede usar (sin v26, o la cuenta no es administradora):
+// entonces el panel lee las vistas una por una y explica qué falta.
+async function fetchDashboard(token, aud) {
+  const res = await fetch(SB_URL + '/rest/v1/rpc/analytics_dashboard', { method: 'POST', headers: { apikey: SB_KEY, Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ p_aud: aud }) });
+  if (res.status === 401) { const e = new Error('Sesión vencida'); e.code = 401; throw e; }
+  if (!res.ok) { console.warn('analytics_dashboard respondió ' + res.status + '; se leen las vistas una por una.'); return null; }
+  return res.json();
+}
+
+// Procesa en Supabase sólo los eventos que llegaron desde la última vez.
+// { status: 'ok' } si cambió algo; 'fresh' si no había nada nuevo; 'busy' si ya corría.
+async function refreshCache(token) {
+  const res = await fetch(SB_URL + '/rest/v1/rpc/analytics_refresh', { method: 'POST', headers: { apikey: SB_KEY, Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: '{}' });
+  if (!res.ok) throw new Error('analytics_refresh respondió ' + res.status);
+  return res.json();
+}
+
+// Lo último que mostró el panel, guardado en este navegador (IndexedDB: pesa
+// ~2 MB, demasiado para localStorage) para dibujarlo al instante la próxima vez.
+// Se borra al cerrar sesión. Si el navegador no lo permite, simplemente no hay.
+let IDB = null;
+function idbOpen() {
+  if (!IDB) IDB = new Promise((ok, ko) => { const r = indexedDB.open('agrupay-panel', 1); r.onupgradeneeded = () => r.result.createObjectStore('kv'); r.onsuccess = () => ok(r.result); r.onerror = () => ko(r.error); }).catch(() => null);
+  return IDB;
+}
+async function idbGet(key) {
+  try { const db = await idbOpen(); if (!db) return null; return await new Promise((ok) => { const q = db.transaction('kv').objectStore('kv').get(key); q.onsuccess = () => ok(q.result || null); q.onerror = () => ok(null); }); } catch (e) { return null; }
+}
+async function idbSet(key, val) {
+  try { const db = await idbOpen(); if (db) db.transaction('kv', 'readwrite').objectStore('kv').put(val, key); } catch (e) {}
+}
+async function idbClear() {
+  try { const db = await idbOpen(); if (db) db.transaction('kv', 'readwrite').objectStore('kv').clear(); } catch (e) {}
+}
+
 // Guarda filas de analytics_testers: crea las nuevas y, en las que ya existen,
 // cambia sólo las columnas que vienen (todas las filas con las mismas columnas).
 async function upsertTesters(rows, token) {

@@ -18,6 +18,7 @@ de un administrador. Sin sesión muestra datos de ejemplo con la misma forma.
 | `sql/altanto_analytics_v25_bitacora.sql` | Bitácora: hitos que anota el equipo y versiones de la app detectadas solas. |
 | `js/guide.js` | La guía del «?»: para qué sirve cada sección y qué significa cada número. |
 | `sql/altanto_analytics_v24_personas.sql` | Filtro por personas elegidas (ID o correo) en todas las secciones. |
+| `sql/altanto_analytics_v26_rendimiento.sql` | Caché incremental: el panel carga en una llamada y Supabase procesa sólo los eventos nuevos. |
 | `sql/altanto_analytics_v23_comercios.sql` | Cadenas de comercios, comercios por persona (Monitoreo de comercios) y el correo de entrada en el perfil. |
 | `manifest.webmanifest`, `icons/` | Ícono del panel, de la pestaña del navegador y de «Añadir a inicio». |
 
@@ -45,6 +46,9 @@ separado de la base de la app.
 5. Corre [`sql/altanto_analytics_v24_personas.sql`](sql/altanto_analytics_v24_personas.sql) para filtrar por personas
    elegidas.
 6. Corre [`sql/altanto_analytics_v25_bitacora.sql`](sql/altanto_analytics_v25_bitacora.sql) para la Bitácora.
+7. Corre [`sql/altanto_analytics_v26_rendimiento.sql`](sql/altanto_analytics_v26_rendimiento.sql) para que el panel
+   cargue rápido (caché incremental). Sin ella el panel funciona igual, leyendo vista por vista.
+   Si vuelves a correr v22, corre v26 otra vez después: v22 rehace `analytics_ev` con el filtro lento.
 
 La llave del panel es la **publicable**: sólo puede llamar `ingest_analytics`; leer exige una sesión
 que esté en `analytics_admins`. Nunca pongas aquí la `service_role`.
@@ -69,6 +73,25 @@ que esté en `analytics_admins`. Nunca pongas aquí la `service_role`.
   detalle persona por persona, su avance día a día y un mapa de las sesiones de cada tester del día 1
   al 14. Se miden al último día del rango; quien no llegó a su día 14 cuenta como «en curso». Las
   metas y definiciones están en `HYP`, en `js/panel.js`.
+
+## Rendimiento (v26)
+
+Antes, cada visita pedía ~58 vistas y cada una recorría todos los eventos desde cero. Ahora:
+
+- **Caché incremental** (`analytics_cache`): el resultado de cada vista, ya calculado para Todos,
+  Testers y No testers. `analytics_refresh()` mira sólo los eventos que llegaron desde la última vez
+  (`received_at`) y recalcula sólo los días a los que pertenecen. Las vistas de «últimos 30 días» y
+  las cohortes se rehacen enteras como mucho cada 15 minutos. pg_cron la corre cada 5 minutos y el
+  panel también al abrir y al tocar Actualizar.
+- **Una llamada**: `analytics_dashboard(aud)` devuelve todo el panel. El panel muestra primero lo
+  último guardado en el navegador (IndexedDB, se borra al cerrar sesión) y luego lo pone al día.
+- **Testers y cadenas**: al cambiar `analytics_testers` o `analytics_merchant_chains`, la próxima
+  actualización rehace lo que depende de ellos.
+- **Personas elegidas** siguen leyendo las vistas en vivo (no se pueden precalcular), pero
+  `analytics_ev` ahora filtra la audiencia una vez por consulta y no una vez por evento.
+- **Vista nueva**: créala como siempre, agrégala a `analytics_cache_views` (modo `inc` si cada fila
+  depende sólo de los eventos de su día/semana/mes; `full` si depende de «hoy» o de toda la historia)
+  y corre `select analytics_refresh(true);`. Para ver el estado: `select * from analytics_cache_state;`.
 
 ## Bitácora (v25) y guía
 
