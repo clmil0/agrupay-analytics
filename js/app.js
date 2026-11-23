@@ -150,8 +150,8 @@ class App {
     const cached = !this.state.pick.length;
     const saved = cached ? await idbGet('dash:' + aud) : null;
     if (!current()) return;
-    if (saved && saved.views) this.setState({ mode: 'live', data: saved.views, email: saved.email, notice: null, updatedAt: new Date(saved.at), syncing: true });
-    else this.setState({ mode: 'loading', notice: null, syncing: false });
+    if (saved && saved.views) this.setState({ mode: 'live', data: saved.views, email: saved.email, notice: null, updatedAt: new Date(saved.at), syncing: true, source: 'local' });
+    else this.setState({ mode: 'loading', notice: null, syncing: false, source: cached ? 'cache' : 'views' });
     try {
       const tk = await this.token();
       if (!tk) throw Object.assign(new Error('Sesión vencida'), { code: 401 });
@@ -167,7 +167,12 @@ class App {
           if (r && r.status === 'ok') dash = await fetchDashboard(tk, aud);
           if (!current()) return;
           if (r && r.status === 'ok' && dash) await this.showDash(dash, aud, tk, user, false, current);
-          else this.setState({ syncing: false });
+          else {
+            // Sin eventos nuevos: igual quedó revisado ahora.
+            const sys = this.state.data && this.state.data._system;
+            if (sys && r && r.checked_at) sys.checked_at = r.checked_at;
+            this.setState({ syncing: false });
+          }
           return;
         }
       }
@@ -183,6 +188,7 @@ class App {
   // Dibuja lo que devolvió analytics_dashboard y lo guarda en este navegador.
   async showDash(dash, aud, tk, user, syncing, current) {
     const data = dash.views || {};
+    if (dash.system) data._system = dash.system;
     const empty = Object.entries(data).every(([v, rows]) => V22.includes(v) || V23.includes(v) || V25.includes(v) || !rows || !rows.length);
     let notice = null;
     if (empty) notice = aud !== 'all' ? 'Ninguna vista trae datos para «' + lab('aud', aud) + '». ¿Ya marcaste a los testers en la sección Testers?' : await this.diagnose(tk, user);
@@ -191,7 +197,7 @@ class App {
     const email = user.email || 'sesión iniciada';
     // Copia tomada antes de dibujar: el dibujo le agrega datos derivados (_people…) que no se guardan.
     idbSet('dash:' + aud, { views: { ...data }, email, at: at.toISOString() });
-    this.setState({ mode: 'live', data, email, notice, updatedAt: at, syncing });
+    this.setState({ mode: 'live', data, email, notice, updatedAt: at, syncing, source: 'cache' });
   }
 
   // Lectura vista por vista (personas elegidas, o Supabase sin v26).
@@ -214,9 +220,12 @@ class App {
     jobs.push(['analytics_app_releases', '']);
     jobs.push(['analytics_merchant_person_daily', 'day=gte.' + addD(today, -89) + '&order=day.asc']);
     const failed = [];
+    const sysP = fetchSystem(tk).catch(() => null);
     const res = await Promise.all(jobs.map(([v, f, a]) => fetchView(v, f, tk, a).catch((e) => { if (e.code === 401) throw e; failed.push(v); return []; })));
     const data = {};
     jobs.forEach(([v], i) => (data[v] = res[i]));
+    const sys = await sysP;
+    if (sys) data._system = sys;
     const user = await userP;
     const empty = jobs.every(([v], i) => V22.includes(v) || V23.includes(v) || V25.includes(v) || !res[i].length);
     if (failed.length === jobs.length) throw new Error('ninguna vista respondió. ¿Ya corriste agrupay_analytics_v16.sql?');
@@ -230,7 +239,34 @@ class App {
     let notice = parts.join(' ') || null;
     if (!notice && empty) notice = this.state.pick.length ? 'Ninguna vista trae datos de las personas elegidas en este rango.' : aud !== 'all' ? 'Ninguna vista trae datos para «' + lab('aud', aud) + '». ¿Ya marcaste a los testers en la sección Testers?' : await this.diagnose(tk, user);
     if (!current()) return;
-    this.setState({ mode: 'live', data, email: user.email || 'sesión iniciada', notice, updatedAt: new Date(), syncing: false });
+    this.setState({ mode: 'live', data, email: user.email || 'sesión iniciada', notice, updatedAt: new Date(), syncing: false, source: 'views' });
+  }
+
+  // «Cómo se leen estos datos»: en el Resumen siempre y, mientras carga, en
+  // cualquier sección. De dónde salen, cada cuánto se ponen al día, qué se
+  // procesó la última vez y cuánto ocupa la base.
+  dataStrip(sec) {
+    const S = this.state;
+    const loading = S.mode === 'loading';
+    if (sec.id !== 'resumen' && !loading) return '';
+    const sys = S.mode !== 'loading' ? this.data()._system : null;
+    const pick = S.pick.length > 0;
+    let dot, head, how;
+    if (S.mode === 'demo') { dot = 'var(--c-orange)'; head = 'Datos de ejemplo'; how = 'No se lee Supabase. Entra con Google para ver los datos reales.'; }
+    else if (loading) { dot = 'var(--c-blue)'; head = 'Cargando'; how = S.source === 'views' ? 'Personas elegidas: se calcula al momento desde las vistas de Supabase.' : 'Una sola llamada a la caché de Supabase: los números ya están calculados, no se recalcula nada.'; }
+    else if (S.syncing) { dot = 'var(--c-blue)'; head = S.source === 'local' ? 'Lo guardado en este navegador' : 'Caché de Supabase'; how = 'Buscando eventos nuevos: Supabase procesa sólo lo que llegó desde la última vez…'; }
+    else if (S.source === 'views') { dot = 'var(--pos)'; head = 'En vivo'; how = pick ? 'Personas elegidas: se calcula al momento desde las vistas, sin la caché.' : 'Vista por vista (la caché de v26 no respondió).'; }
+    else { dot = 'var(--pos)'; head = 'Caché incremental'; how = 'Supabase la pone al día cada ' + ((sys && sys.schedule_min) || 5) + ' min y al abrir el panel, procesando sólo los eventos nuevos.'; }
+    const bits = [];
+    if (sys && S.mode === 'live') {
+      bits.push('Revisado ' + HM(sys.checked_at || sys.refreshed_at) + ' · último evento recibido ' + HM(sys.data_until));
+      const li = sys.last_info;
+      if (li && li.status === 'ok') bits.push('Última pasada: ' + (ok(li.events) ? N(li.events) + ' eventos nuevos, ' : '') + (li.from_day ? 'recalculó desde el ' + fd(li.from_day) : 'rehízo lo de 30 días') + ' en ' + MS(li.ms));
+      if (num(sys.cron_failed_24h) > 0) bits.push('⚠ ' + N(sys.cron_failed_24h) + ' actualizaciones automáticas fallaron en 24 h');
+    }
+    const used = sys && sys.db_limit_bytes ? Math.min(100, (num(sys.db_bytes) / num(sys.db_limit_bytes)) * 100) : null;
+    const db = used != null ? `<span class="ds-db" title="Base de analítica en Supabase: ${esc(MB(sys.db_bytes))} de ${esc(MB(sys.db_limit_bytes))}. Crece ~${esc(MB(num(sys.growth_per_day) * 30))} al mes.">Base ${esc(MB(sys.db_bytes))} de ${esc(MB(sys.db_limit_bytes))}<i class="ds-bar"><b style="width:${Math.max(2, used).toFixed(1)}%;background:${used >= 80 ? 'var(--neg)' : 'var(--c-blue)'}"></b></i>${esc(P(r1(used)))}</span>` : '';
+    return `<div class="datasrc anim" style="--i:1" role="status"><span class="ds-main"><span class="dot" style="background:${dot}"></span><b>${esc(head)}</b><span>${esc(how)}</span></span>${bits.map((b) => `<span class="ds-bit">${esc(b)}</span>`).join('')}${db}</div>`;
   }
 
   // Por qué llegaron vacías todas las vistas: ¿no es administrador, o sólo
@@ -695,6 +731,7 @@ class App {
             <div class="hero-text"><div class="h1-row"><h1>${esc(sec.label)}</h1><button class="help-btn" data-act="guide" aria-label="Guía de ${esc(sec.label)}" title="Qué significa cada cosa">?</button></div><div class="desc">${esc(sec.desc)}</div></div>
             <div class="hero-ctl">${this.controls(sec, false)}</div>
           </section>
+          ${this.dataStrip(sec)}
           ${S.notice ? `<div class="notice">${esc(S.notice)}</div>` : ''}
           ${audNote ? `<div class="notice">${esc(audNote)}</div>` : ''}
           ${buildError ? `<div class="notice">No se pudo armar esta sección: ${esc(buildError.message)}</div>` : ''}
@@ -744,6 +781,7 @@ class App {
     if (sec) {
       body = `<div class="m-head anim" style="--i:0"><div class="h1-row"><h1>${esc(sec.label)}</h1><button class="help-btn" data-act="guide" aria-label="Guía de ${esc(sec.label)}">?</button></div><div class="desc">${esc(sec.desc)}</div></div>
         <div class="m-pad m-ctl anim" style="--i:1">${this.controls(sec, true)}</div>
+        ${this.dataStrip(sec) ? `<div class="m-pad">${this.dataStrip(sec)}</div>` : ''}
         ${S.notice ? `<div class="m-pad"><div class="notice">${esc(S.notice)}</div></div>` : ''}
         ${audNote ? `<div class="m-pad"><div class="notice">${esc(audNote)}</div></div>` : ''}
         ${buildError ? `<div class="m-pad"><div class="notice">No se pudo armar esta sección: ${esc(buildError.message)}</div></div>` : ''}

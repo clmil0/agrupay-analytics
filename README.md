@@ -19,6 +19,7 @@ de un administrador. Sin sesión muestra datos de ejemplo con la misma forma.
 | `js/guide.js` | La guía del «?»: para qué sirve cada sección y qué significa cada número. |
 | `sql/altanto_analytics_v24_personas.sql` | Filtro por personas elegidas (ID o correo) en todas las secciones. |
 | `sql/altanto_analytics_v26_rendimiento.sql` | Caché incremental: el panel carga en una llamada y Supabase procesa sólo los eventos nuevos. |
+| `sql/altanto_analytics_v27_sistema.sql` | Estado de los datos y espacio de la base, para el Resumen. |
 | `sql/altanto_analytics_v23_comercios.sql` | Cadenas de comercios, comercios por persona (Monitoreo de comercios) y el correo de entrada en el perfil. |
 | `manifest.webmanifest`, `icons/` | Ícono del panel, de la pestaña del navegador y de «Añadir a inicio». |
 
@@ -49,6 +50,8 @@ separado de la base de la app.
 7. Corre [`sql/altanto_analytics_v26_rendimiento.sql`](sql/altanto_analytics_v26_rendimiento.sql) para que el panel
    cargue rápido (caché incremental). Sin ella el panel funciona igual, leyendo vista por vista.
    Si vuelves a correr v22, corre v26 otra vez después: v22 rehace `analytics_ev` con el filtro lento.
+8. Corre [`sql/altanto_analytics_v27_sistema.sql`](sql/altanto_analytics_v27_sistema.sql) (después de v26) para
+   que el Resumen muestre cómo se leen los datos y cuánto ocupa la base.
 
 La llave del panel es la **publicable**: sólo puede llamar `ingest_analytics`; leer exige una sesión
 que esté en `analytics_admins`. Nunca pongas aquí la `service_role`.
@@ -92,6 +95,18 @@ Antes, cada visita pedía ~58 vistas y cada una recorría todos los eventos desd
 - **Vista nueva**: créala como siempre, agrégala a `analytics_cache_views` (modo `inc` si cada fila
   depende sólo de los eventos de su día/semana/mes; `full` si depende de «hoy» o de toda la historia)
   y corre `select analytics_refresh(true);`. Para ver el estado: `select * from analytics_cache_state;`.
+
+## Estado de los datos y espacio (v27)
+
+- **Cómo se leen los datos**: una franja en el Resumen (y en la pantalla de carga de cualquier
+  sección) dice de dónde salen los números (caché incremental, lo guardado en el navegador, en vivo
+  por personas elegidas o datos de ejemplo), cuándo revisó Supabase por última vez, cuándo llegó el
+  último evento, qué procesó la última pasada y si falló alguna actualización automática en 24 h.
+- **Espacio en la base**: tarjeta al final del Resumen con el tamaño día por día
+  (`analytics_db_size_daily`, lo anota `analytics_refresh()`), el ritmo al que crece y el mes en que
+  se llenaría. Medirlo cuesta milisegundos. El límite está en `analytics_cache_state.db_limit_bytes`
+  (500 MB, plan Free); al pasar a Pro: `update analytics_cache_state set db_limit_bytes = 8 * 1024^3;`.
+- **Bitácora**: tipo nuevo «Cambio en el panel o la analítica» para anotar cambios como estos.
 
 ## Bitácora (v25) y guía
 

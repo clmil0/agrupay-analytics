@@ -34,6 +34,9 @@ const GUIDE = {
       { t: 'Instalaciones nuevas', d: 'Instalaciones que aparecieron por primera vez. Las que ya usaban la app antes de que existiera la analítica cuentan aparte.' },
       { t: 'Sesiones por persona', d: 'Cuántas veces al día, en promedio, entra a la app cada persona activa.' },
       { t: 'Qué trae a la gente de vuelta', d: 'Desde dónde se abrió la app: el ícono, una notificación, el widget o Atajos, o una invitación.' },
+      { t: 'Caché incremental', d: 'De dónde salen los números: Supabase los deja calculados y cada 5 minutos (y al abrir el panel) procesa sólo los eventos que llegaron desde la última vez. Por eso el panel carga en una llamada. Con «Elegir personas» se calcula en vivo.' },
+      { t: 'Revisado / último evento recibido', d: '«Revisado» es la última vez que Supabase buscó eventos nuevos. «Último evento recibido» es cuándo llegó el último lote de la app: si es de hace horas, quizá nadie usó la app o algo falla al enviar.' },
+      { t: 'Espacio en la base de analítica', d: 'Cuánto ocupa la base en Supabase contra el límite del plan (500 MB en el plan Free), a qué ritmo crece y en qué mes se llenaría a ese ritmo. Con 7 días o más de historia el ritmo es medido; antes, estimado con los eventos por día.' },
     ],
   },
   hipotesis: {

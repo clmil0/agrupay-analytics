@@ -58,6 +58,15 @@ h1{margin:0;font-size:clamp(34px,4.2vw,48px);line-height:1;font-weight:500;lette
 .seg button{border-radius:999px;padding:10px 18px;font-size:14px;font-weight:500;color:var(--text2);transition:all .35s cubic-bezier(.2,.8,.2,1);font-variant-numeric:tabular-nums;}
 .seg button.on{background:var(--elev);color:var(--text);box-shadow:0 6px 14px -8px rgba(23,23,26,.35);}
 .notice{padding:14px 18px;border-radius:20px;background:var(--glass);border:1px solid var(--sep2);font-size:14px;text-wrap:pretty;}
+/* Cómo se leen los datos (Resumen y pantalla de carga). */
+.datasrc{display:flex;flex-wrap:wrap;align-items:center;gap:6px 18px;padding:10px 16px;border-radius:16px;background:var(--glass);border:1px solid var(--sep2);font-size:13px;color:var(--text2);line-height:1.35;}
+.datasrc b{color:var(--text);font-weight:600;}
+.ds-main{display:flex;align-items:center;gap:8px;flex-wrap:wrap;min-width:0;}
+.ds-bit{color:var(--text3);font-variant-numeric:tabular-nums;}
+.ds-db{display:inline-flex;align-items:center;gap:8px;margin-left:auto;font-variant-numeric:tabular-nums;white-space:nowrap;}
+.ds-bar{display:inline-block;width:72px;height:6px;border-radius:3px;background:var(--sep2);overflow:hidden;}
+.ds-bar b{display:block;height:100%;border-radius:3px;}
+@media (max-width:899px){.datasrc{gap:4px 12px;padding:10px 14px;font-size:12.5px;}.ds-db{margin-left:0;}}
 
 .kpis{display:flex;flex-wrap:wrap;gap:16px 40px;align-items:center;}
 .kpi{display:flex;align-items:center;gap:14px;min-width:0;}

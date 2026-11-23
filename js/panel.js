@@ -67,6 +67,10 @@ const N0 = (v) => (ok(v) ? nf.format(Math.round(+v)) : '—');
 const P = (v) => (ok(v) ? nf.format(+v) + ' %' : '—');
 const MS = (v) => (!ok(v) ? '—' : +v >= 1000 ? nf.format(Math.round(+v / 100) / 10) + ' s' : Math.round(+v) + ' ms');
 const MIN = (v) => (ok(v) ? nf.format(+v) + ' min' : '—');
+// Tamaños: 41 MB, 1,2 GB.
+const MB = (b) => (!ok(b) ? '—' : +b >= 1024 ** 3 ? nf.format(Math.round(+b / 1024 ** 3 * 10) / 10) + ' GB' : nf.format(Math.round(+b / 1024 ** 2 * 10) / 10) + ' MB');
+// Hora de Lima de un instante (02:15).
+const HM = (t) => (t ? new Date(t).toLocaleTimeString('es-PE', { hour: '2-digit', minute: '2-digit', timeZone: 'America/Lima' }) : '—');
 const FH = (h) => (!ok(h) ? '—' : h < 1 ? Math.round(h * 60) + ' min' : h < 48 ? nf.format(Math.round(h * 10) / 10) + ' h' : nf.format(Math.round(h / 2.4) / 10) + ' d');
 const num = (v) => (ok(v) ? +v : 0);
 // Último día del rango elegido; lo fija build(). Con «Fechas» puede no ser hoy.
@@ -285,6 +289,15 @@ function makeDemo() {
     [-3, null, 'incident', 'Gmail dejó de leer BBVA por 6 horas', 'BBVA cambió el formato del correo; arreglado en el lector.'],
     [3, 7, 'interview', 'Entrevistas finales de Prueba 1', 'H4 (pago) y H7 (recomendación).'],
     [6, null, 'cohort_start', 'Empieza Prueba 2', '20 testers nuevos, más Despistados.']].forEach(([d, e, kind, title, notes], i) => push('analytics_milestones', { id: 'demo-' + i, day: addD(today, d), end_day: e == null ? null : addD(today, e), kind, title, notes, cohort: kind === 'cohort_start' ? 'Prueba 2' : null, version: null, link: null, created_by: 'equipo@altanto.pe' }));
+  // Estado de los datos y espacio (v27), con la forma de analytics_system().
+  const MBb = 1024 * 1024;
+  D._system = {
+    schedule_min: 5, checked_at: new Date(Date.now() - 2 * 60000).toISOString(), refreshed_at: new Date(Date.now() - 4 * 60000).toISOString(), data_until: new Date(Date.now() - 6 * 60000).toISOString(),
+    last_events: 18, last_info: { status: 'ok', events: 18, from_day: today, incremental: 92, full: 0, ms: 410 },
+    db_bytes: 41 * MBb, db_limit_bytes: 500 * MBb, events_bytes: 22 * MBb, cache_bytes: 6 * MBb, events_total: 49700, events_per_day: 940, bytes_per_event: 442,
+    growth_per_day: 0.53 * MBb, growth_measured: false, days_to_full: 866, cron_failed_24h: 0,
+    history: Array.from({ length: 30 }, (_, i) => ({ day: addD(today, i - 29), db_bytes: Math.round((25.5 + i * 0.53) * MBb), events: 30000 + i * 940 })),
+  };
   return D;
 }
 
@@ -359,6 +372,12 @@ async function fetchDashboard(token, aud) {
   if (res.status === 401) { const e = new Error('Sesión vencida'); e.code = 401; throw e; }
   if (!res.ok) { console.warn('analytics_dashboard respondió ' + res.status + '; se leen las vistas una por una.'); return null; }
   return res.json();
+}
+
+// v27: cómo se están leyendo los datos y cuánto ocupa la base. null sin v27.
+async function fetchSystem(token) {
+  const res = await fetch(SB_URL + '/rest/v1/rpc/analytics_system', { method: 'POST', headers: { apikey: SB_KEY, Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: '{}' });
+  return res.ok ? res.json() : null;
 }
 
 // Procesa en Supabase sólo los eventos que llegaron desde la última vez.
@@ -662,10 +681,11 @@ const MKIND = {
   decision: { label: 'Decisión', c: 'var(--c-ink)' },
   incident: { label: 'Incidente', c: 'var(--neg)' },
   campaign: { label: 'Campaña o difusión', c: 'var(--c-yellow)' },
+  analytics: { label: 'Cambio en el panel o la analítica', c: 'var(--c-sand)' },
   other: { label: 'Otro', c: 'var(--text3)' },
 };
 // Los que se anotan a mano (los otros dos los pone el panel).
-const MKIND_MANUAL = ['cohort_start', 'tester_talk', 'interview', 'survey', 'product_change', 'decision', 'incident', 'campaign', 'release', 'other'];
+const MKIND_MANUAL = ['cohort_start', 'tester_talk', 'interview', 'survey', 'product_change', 'decision', 'incident', 'campaign', 'release', 'analytics', 'other'];
 const mkLab = (k) => (MKIND[k] || MKIND.other).label;
 const mkCol = (k) => (MKIND[k] || MKIND.other).c;
 
@@ -863,6 +883,23 @@ function build(id, ctx) {
     const hours = new Map((D.analytics_open_hours_30d || []).map((x) => [num(x.hour), num(x.opens)]));
     const peak = [...hours.entries()].sort((a, b) => b[1] - a[1])[0];
     const dv = (d, k) => num(dam.get(d) && dam.get(d)[k]);
+    // Espacio de la base de analítica (v27): cuánto ocupa, a qué ritmo crece y cuándo se llenaría.
+    const sys = D._system;
+    const hist = sys && Array.isArray(sys.history) ? sys.history : [];
+    const hm = new Map(hist.map((x) => [String(x.day).slice(0, 10), x]));
+    const used = sys && sys.db_limit_bytes ? (num(sys.db_bytes) / num(sys.db_limit_bytes)) * 100 : null;
+    const fullDay = sys && ok(sys.days_to_full) ? addD(T, Math.min(+sys.days_to_full, 3650)) : null;
+    const fullTxt = fullDay ? MESL[+fullDay.slice(5, 7) - 1] + ' de ' + fullDay.slice(0, 4) : '—';
+    const MBv = (v) => nf.format(Math.round(v * 10) / 10) + ' MB';
+    const space = sys ? [bars(ctx, {
+      id: 'db-space', area: true, tone: used >= 80 ? 'orange' : '', title: 'Espacio en la base de analítica',
+      sub: 'Lo que ocupa en Supabase, día por día. Límite del plan: ' + MB(sys.db_limit_bytes) + '.', meta: 'se mide cada ' + (sys.schedule_min || 5) + ' min',
+      big: MB(sys.db_bytes), bigSub: P(r1(used)) + ' del límite · crece ' + MB(num(sys.growth_per_day) * 30) + ' al mes' + (sys.growth_measured ? '' : ' (estimado)') + ' · se llenaría hacia ' + fullTxt,
+      keys: hist.map((x) => String(x.day).slice(0, 10)), xlab: fd, fmt: MBv, klabel: 'Día',
+      tipFn: (d) => { const x = hm.get(d); return fd(d) + ' · ' + MB(x && x.db_bytes) + ' · ' + N(x && x.events) + ' eventos guardados'; },
+      series: [{ label: 'Tamaño', c: COL.blue, get: (d) => num(hm.get(d) && hm.get(d).db_bytes) / 1024 / 1024 }],
+      detail: table({ id: 'db-space-d', show: Infinity, cols: [{ label: 'Día', align: 'left', w: 'minmax(96px,1.3fr)' }, { label: 'Tamaño', bar: true }, { label: 'Eventos guardados' }], rows: hist.slice().reverse().map((x) => [{ v: fd(x.day), fw: 500 }, { v: MB(x.db_bytes), n: num(x.db_bytes) }, N(x.events)]) }),
+    })] : [];
     return {
       kpis: [
         kpi('DAU', N(last && last.active_installs), last ? fd(lastDay) + ' · promedio ' + N0(avg) : '—'),
@@ -880,7 +917,7 @@ function build(id, ctx) {
         bars(ctx, { id: 'wau', title: 'Activos por semana', sub: 'WAU. La semana empieza el lunes.', meta: '12 semanas', klabel: 'Semana', keys: weeks, xlab: (w) => fd(w), tipFn: (w, v) => 'Semana del ' + fd(w) + ' · ' + N(v[0] + v[1]) + ' activos · ' + N(v[1]) + ' Pro', series: [{ label: 'Gratis', c: COL.ink, get: (w) => { const x = wkm.get(w); return x ? num(x.active_installs) - num(x.active_pro) : 0; } }, { label: 'Pro', c: COL.a, get: (w) => num(wkm.get(w) && wkm.get(w).active_pro) }] }),
         mix({ id: 'sources', title: 'Qué trae a la gente de vuelta', sub: 'Aperturas por origen.', bigSub: 'aperturas en ' + R + ' días', items: items(group(src, (x) => x.source, (x) => x.opens), 'src') }),
         bars(ctx, { id: 'hours', area: true, title: 'Hora de apertura', sub: 'Aperturas por hora, en hora de Lima.', meta: '30 días', big: peak ? peak[0] + ':00' : '', bigSub: 'la hora con más aperturas', klabel: 'Hora', keys: [...Array(24).keys()], xlab: (h) => h + ' h', tipFn: (h, v) => h + ':00 – ' + h + ':59 · ' + N(v[0]) + ' aperturas', series: [{ label: 'Aperturas', c: COL.blue, get: (h) => hours.get(h) || 0 }] }),
-      ],
+      ].concat(space),
     };
   }
 
