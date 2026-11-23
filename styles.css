@@ -92,6 +92,7 @@ h1{margin:0;font-size:clamp(34px,4.2vw,48px);line-height:1;font-weight:500;lette
 .card-titles{display:flex;flex-direction:column;gap:4px;min-width:0;}
 .card-title{font-size:16px;font-weight:500;}
 .card-sub{font-size:13px;color:var(--text2);text-wrap:pretty;}
+.card-act{margin-top:10px;}
 .card-tools{display:flex;align-items:center;gap:10px;flex-shrink:0;}
 .card-meta{font-size:13px;color:var(--text2);white-space:nowrap;}
 .icon-btn{width:40px;height:40px;border-radius:50%;border:1px solid var(--sep2);display:grid;place-items:center;transition:background .25s,color .25s,border-color .25s;flex-shrink:0;box-sizing:border-box;}

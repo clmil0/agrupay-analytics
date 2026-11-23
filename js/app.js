@@ -59,6 +59,8 @@ class App {
     const q = new URLSearchParams(location.search);
     this.forceDemo = q.has('demo');
     this.captureHash();
+    const qs = q.get('s'); // ?s=sistema abre esa sección (lo usan los correos de alerta)
+    if (SECTIONS.some((s) => s.id === qs)) ui.section = qs;
     this.state = { section: SECTIONS.some((s) => s.id === ui.section) || ui.section === 'mas' ? ui.section : 'resumen', range: ui.range || 30, from: ui.from || null, to: ui.to || null, aud: ui.aud || 'all', pick: Array.isArray(ui.pick) ? ui.pick.filter((x) => typeof x === 'string').slice(0, 200) : [], by: ui.by || 'persona', calMonth: null, calDay: null, calKinds: Array.isArray(ui.calKinds) ? ui.calKinds : [], calAuto: ui.calAuto !== false, sideMini: typeof ui.sideMini === 'boolean' ? ui.sideMini : null, cohort: ui.cohort || '', wide: window.innerWidth >= 900, mode: !this.forceDemo && this.session() ? 'loading' : 'demo', data: null, email: null, notice: this.hashNotice || null, updatedAt: null, demoChosen: !!ui.demo };
     this.cards = new Map();
     this.sheet = false;
@@ -373,6 +375,7 @@ class App {
     else if (a === 'demo') { this.setState({ demoChosen: true }); this.saveUI({ demo: true }); }
     else if (a === 'sheet') this.setSheet(el.dataset.open === '1');
     else if (a === 'tipclear') this.clearTip(el.closest('[data-card]'));
+    else if (a === 'alert-test') this.testAlert(el);
   }
   onChange(e) {
     const k = e.target.dataset.ch;
@@ -435,6 +438,17 @@ class App {
     this.msEdit = null;
     document.documentElement.classList.remove('noscroll');
     this.setState({ calDay: saved.day.slice(0, 10), calMonth: saved.day.slice(0, 7), notice: S.mode !== 'live' ? 'Con los datos de ejemplo los hitos no se guardan: se pierden al recargar.' : null });
+  }
+  // Sistema › Alertas por correo: pide a Supabase un correo de prueba (v29).
+  async testAlert(btn) {
+    if (this.state.mode !== 'live') { this.setState({ notice: 'Con los datos de ejemplo no se mandan correos.' }); return; }
+    if (btn) btn.disabled = true;
+    let r;
+    try { r = await testAlert(await this.token()); }
+    catch (e) { this.setState({ notice: 'No se mandó la prueba: ' + e.message }); return; }
+    const M = { sent: 'Correo de prueba pedido a Resend para ' + r.sent + (r.sent === 1 ? ' destinatario' : ' destinatarios') + '. Llega en un minuto; si no aparece, revisa spam. En «Ver detalle» de la tarjeta queda si salió (se actualiza cada 10 min).', wait: 'Ya se mandó una prueba hace menos de un minuto. Espera un poco.', no_key: 'Falta guardar la llave de Resend en Supabase (Vault, «analytics_alert_key»).', off: 'Las alertas están apagadas en analytics_alert_config.' };
+    this.setState({ notice: M[r.status] || 'Supabase respondió: ' + JSON.stringify(r) });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   }
   async deleteMs() {
     const m = this.msEdit;
@@ -925,7 +939,7 @@ function renderCard(c, mobile, i) {
   const open = (inner, cls) => `<button class="${cls}" data-act="detail" data-id="${esc(c.id)}">${inner}</button>`;
   return `<section class="card t-${esc(c.type)} span-${esc(c.size)}${c.tone ? ' tone-' + esc(c.tone) : ''} anim" style="--i:${i}" data-card="${esc(c.id)}">
     <div class="card-head">
-      <div class="card-titles"><div class="card-title">${esc(c.title)}</div>${c.sub ? `<div class="card-sub">${esc(c.sub)}</div>` : ''}</div>
+      <div class="card-titles"><div class="card-title">${esc(c.title)}</div>${c.sub ? `<div class="card-sub">${esc(c.sub)}</div>` : ''}${c.action ? `<div class="card-act"><button class="pill ghost small" data-act="${esc(c.action.act)}">${esc(c.action.label)}</button></div>` : ''}</div>
       <div class="card-tools">${c.meta ? `<span class="card-meta">${esc(c.meta)}</span>` : ''}${can ? `<button class="icon-btn" data-act="detail" data-id="${esc(c.id)}" aria-label="Ver detalle de ${esc(c.title)}" title="Ver detalle">${svg('arrow', 16)}</button>` : ''}</div>
     </div>
     ${renderBig(c)}

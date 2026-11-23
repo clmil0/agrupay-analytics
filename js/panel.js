@@ -314,6 +314,10 @@ function makeDemo() {
     last_event_at: new Date(hNow - 6 * 60000).toISOString(), today_events: 512, today_installs: 8,
     cron_24h: { runs: 288, failed: 0, avg_ms: 35 },
     refresh_log: Array.from({ length: 12 }, (_, i) => ({ at: new Date(hNow - (i * 25 + 3) * 60000).toISOString(), origin: i % 4 === 1 ? 'panel' : 'auto', status: 'ok', events: Math.round(5 + r() * 40), from_day: today, incremental: 92, full_views: i % 3 === 0 ? 68 : 0, ms: Math.round(i % 3 === 0 ? 2400 + r() * 600 : 300 + r() * 400) })),
+    alerts: { key: true, enabled: true, from: 'AlTanto Analytics <onboarding@resend.dev>', recipients: ['equipo@altanto.pe'], to_admins: false,
+      thresholds: { stale_minutes: 30, ingest_hours: 18, space_pct: 80, reminder_hours: 24 }, cron_last: { at: new Date(hNow - 4 * 60000).toISOString(), status: 'succeeded' },
+      alerts: [{ code: 'ingest', title: 'No llegan eventos de la app', detail: 'El último evento llegó hace 18 h 10 min.', opened_at: new Date(hNow - 3 * 864e5).toISOString(), closed_at: new Date(hNow - 3 * 864e5 + 2.5 * 3600e3).toISOString(), last_sent_at: new Date(hNow - 3 * 864e5).toISOString(), sent_count: 1 }],
+      sends: [{ at: new Date(hNow - 3 * 864e5 + 2.5 * 3600e3).toISOString(), kind: 'resolved', recipient: 'equipo@altanto.pe', status: 200 }, { at: new Date(hNow - 3 * 864e5).toISOString(), kind: 'open', recipient: 'equipo@altanto.pe', status: 200 }] },
     loads: Array.from({ length: 40 }, (_, i) => { const at = new Date(hNow - i * 17 * 3600e3 * r()); const local = r() < 0.6; const data = Math.round(700 + r() * 900); return { at: at.toISOString(), source: 'cache', aud: 'all', first_ms: local ? Math.round(40 + r() * 40) : data, data_ms: data, total_ms: data + Math.round(200 + r() * 300), kb: 1780, refresh: r() < 0.5 ? 'ok' : 'fresh' }; }),
   };
   return D;
@@ -400,6 +404,14 @@ function logLoad(token, p) {
   fetch(SB_URL + '/rest/v1/rpc/analytics_log_load', { method: 'POST', headers: { apikey: SB_KEY, Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify({ p }) }).catch(() => {});
 }
 
+// v29: manda un correo de prueba de las alertas. { status: 'sent' | 'wait' | 'no_key' | 'off', sent }.
+async function testAlert(token) {
+  const res = await fetch(SB_URL + '/rest/v1/rpc/analytics_alert_test', { method: 'POST', headers: { apikey: SB_KEY, Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: '{}' });
+  if (res.status === 401) { const e = new Error('Sesión vencida'); e.code = 401; throw e; }
+  if (!res.ok) throw new Error('analytics_alert_test respondió ' + res.status + (res.status === 404 ? ': corre sql/altanto_analytics_v29_alertas.sql' : ''));
+  return res.json();
+}
+
 // v27: cómo se están leyendo los datos y cuánto ocupa la base. null sin v27.
 async function fetchSystem(token) {
   const res = await fetch(SB_URL + '/rest/v1/rpc/analytics_system', { method: 'POST', headers: { apikey: SB_KEY, Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' }, body: '{}' });
@@ -447,7 +459,7 @@ async function upsertTesters(rows, token) {
 // y un tamaño en la cuadrícula de 12 columnas: full, lg (8), md (6) o sm (4).
 // `detail` es lo que se abre con «Ver detalle»: otra tarjeta, casi siempre una tabla.
 function base(o) {
-  return { id: o.id, title: o.title, sub: o.sub || '', meta: o.meta || '', size: o.wide ? 'full' : o.size || 'md', tone: o.tone || '', big: o.big || '', bigSub: o.bigSub || '', type: 'empty', detail: o.detail || null, dtitle: o.dtitle || 'Detalle', more: 0 };
+  return { id: o.id, title: o.title, sub: o.sub || '', meta: o.meta || '', size: o.wide ? 'full' : o.size || 'md', tone: o.tone || '', big: o.big || '', bigSub: o.bigSub || '', type: 'empty', detail: o.detail || null, dtitle: o.dtitle || 'Detalle', more: 0, action: o.action || null };
 }
 
 // Tope «redondo» del eje: 1, 2, 2,5, 5 o 10 por potencia de diez.
@@ -861,10 +873,40 @@ function sysChecks(sys, T) {
   const p50 = quant(loads.map((l) => l.data_ms), 0.5);
   const ldState = p50 == null ? 'none' : p50 < 3000 ? 'ok' : p50 < 6000 ? 'warn' : 'bad';
   out.push({ key: 'speed', state: ldState, title: 'Velocidad del panel', value: p50 == null ? 'Sin datos' : MS(p50), foot: p50 == null ? 'se mide en cada visita' : 'mediana 7 días · ' + N(loads.length) + ' visitas', sub: 'Hasta ver los datos de Supabase en el navegador. Antes de v26 cada visita pedía ~58 consultas de 0,6 a 4,4 s cada una.' });
+  const al = det.alerts;
+  if (al) {
+    const th = al.thresholds || {};
+    const last = (al.sends || []).find((x) => x.status != null);
+    const failed = last && !(last.status >= 200 && last.status < 300);
+    const cronOk = al.cron_last && al.cron_last.status === 'succeeded' && mins(al.cron_last.at) < 25;
+    const open = (al.alerts || []).filter((a) => !a.closed_at).length;
+    const st = !al.key || !al.enabled ? 'warn' : failed || !cronOk ? 'bad' : 'ok';
+    out.push({ key: 'alerts', state: st, title: 'Alertas por correo', value: !al.key ? 'Sin activar' : !al.enabled ? 'Apagadas' : open ? N(open) + (open === 1 ? ' abierta' : ' abiertas') : 'Activas', foot: N((al.recipients || []).length) + ((al.recipients || []).length === 1 ? ' destinatario' : ' destinatarios') + ' · cada 10 min',
+      sub: !al.key ? 'Falta guardar la llave de Resend en Supabase (Vault, «analytics_alert_key»). Mientras tanto, las fallas sólo se ven aquí.' : !al.enabled ? 'Están apagadas en analytics_alert_config.' : failed ? 'El último correo no salió: ' + (last.error || 'Resend respondió ' + last.status) + '.' : !cronOk ? 'El job «analytics-alerts» de pg_cron no corrió en los últimos 25 min.' : 'Avisan si se detiene la actualización, si no llega ningún evento en ' + (th.ingest_hours || 18) + ' h o si la base pasa del ' + (th.space_pct || 80) + ' %.' });
+  }
   out.push({ key: 'backup', state: 'warn', title: 'Copias de seguridad', value: 'Ninguna', foot: 'plan Free de Supabase', sub: 'Supabase no guarda copias en el plan Free. Opciones: plan Pro (US$25/mes, copia diaria) o una copia semanal automática.' });
   return out;
 }
 const CHK = { ok: { kicker: 'Bien', tone: 'dark' }, warn: { kicker: 'Revisar', tone: 'orange' }, bad: { kicker: 'Falla', tone: 'orange' }, none: { kicker: 'Sin datos', tone: 'dark' } };
+
+// Alertas por correo (v29): lo que se avisó y a quién.
+const ALK = { open: 'Nueva falla', reminder: 'Recordatorio', resolved: 'Resuelta', test: 'Prueba' };
+function alertCard(al) {
+  if (!al) return tiles({ id: 'alerts', title: 'Alertas por correo', sub: 'Corre sql/altanto_analytics_v29_alertas.sql en Supabase.', items: [] });
+  const list = al.alerts || [], sends = al.sends || [];
+  const to = al.recipients || [];
+  const sent = (x) => x.status >= 200 && x.status < 300;
+  return table({ id: 'alerts', wide: true, title: 'Alertas por correo', meta: 'revisa cada 10 min', show: 6, minW: '560px',
+    sub: !al.key ? 'Todavía no se mandan: falta guardar la llave de Resend en Supabase. Lo que falle igual queda anotado aquí.'
+      : 'Llegan a ' + (to.length ? to.join(', ') : 'nadie') + (al.to_admins ? ' (los administradores)' : '') + '. Un correo cuando algo empieza a fallar, un recordatorio cada ' + ((al.thresholds || {}).reminder_hours || 24) + ' h si sigue y otro cuando se resuelve.',
+    action: al.key ? { act: 'alert-test', label: 'Mandar correo de prueba' } : null,
+    cols: [{ label: 'Empezó', align: 'left', w: 'minmax(110px,1.2fr)' }, { label: 'Qué pasó', align: 'left', w: 'minmax(180px,2.4fr)' }, { label: 'Estado', align: 'left' }, { label: 'Correos' }],
+    rows: list.length ? list.map((a) => [{ v: fd(limaDay(a.opened_at)) + ' ' + HM(a.opened_at), fw: 500 }, a.title, a.closed_at ? { v: 'Resuelta · duró ' + FH((new Date(a.closed_at) - new Date(a.opened_at)) / 3600e3) } : { v: 'Abierta', color: 'var(--neg)', fw: 600 }, N(a.sent_count)])
+      : [[{ v: '—', fw: 500 }, { v: 'Nada falló desde que se activaron', color: 'var(--text3)' }, '', '']],
+    detail: !sends.length ? null : table({ id: 'alerts-d', show: Infinity, minW: '560px', cols: [{ label: 'Cuándo', align: 'left', w: 'minmax(110px,1.2fr)' }, { label: 'Tipo', align: 'left' }, { label: 'Para', align: 'left', w: 'minmax(150px,1.6fr)' }, { label: 'Resultado', align: 'left', w: 'minmax(150px,1.8fr)' }],
+      rows: sends.map((x) => [{ v: fd(limaDay(x.at)) + ' ' + HM(x.at), fw: 500 }, ALK[x.kind] || x.kind, x.recipient, x.status == null ? 'pendiente' : sent(x) ? 'Enviado' : { v: 'No salió: ' + (x.error || x.status), color: 'var(--neg)' }]) }),
+    dtitle: 'Correos enviados' });
+}
 
 function sistema(ctx) {
   const T = ctx.today, sys = ctx.D._system;
@@ -916,6 +958,7 @@ function sistema(ctx) {
         detail: table({ id: 'panel-load-d', show: Infinity, minW: '560px', cols: [{ label: 'Cuándo', align: 'left', w: 'minmax(110px,1.3fr)' }, { label: 'Primer dato' }, { label: 'De Supabase', bar: true }, { label: 'Al día' }, { label: 'Tamaño' }, { label: 'Actualización', align: 'left' }],
           rows: loads.map((l) => [{ v: fd(limaDay(l.at)) + ' ' + HM(l.at), fw: 500 }, MS(l.first_ms), { v: MS(l.data_ms), n: num(l.data_ms) }, MS(l.total_ms), ok(l.kb) ? N(l.kb) + ' KB' : '—', l.refresh === 'ok' ? 'procesó eventos nuevos' : l.refresh === 'fresh' ? 'no había nada nuevo' : l.refresh || '—']) }) }),
       spaceCard(ctx, sys),
+      alertCard(det.alerts),
       table({ id: 'refresh-log', wide: true, title: 'Últimas actualizaciones de la caché', sub: 'Cada vez que Supabase procesó eventos nuevos. «Desde» es el primer día que recalculó; las completas rehacen lo de 30 días y las cohortes.', meta: '30 días',
         cols: [{ label: 'Cuándo', align: 'left', w: 'minmax(110px,1.3fr)' }, { label: 'Origen', align: 'left' }, { label: 'Eventos nuevos', bar: true }, { label: 'Desde' }, { label: 'Tipo', align: 'left' }, { label: 'Duración' }], minW: '560px', show: 8,
         rows: log.map((x) => [{ v: fd(limaDay(x.at)) + ' ' + HM(x.at), fw: 500 }, ORG[x.origin] || x.origin, nc(x.events), x.from_day ? fd(x.from_day) : '—', num(x.full_views) ? 'Completa' : 'Sólo lo nuevo', MS(x.ms)]) }),

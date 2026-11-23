@@ -21,6 +21,7 @@ de un administrador. Sin sesión muestra datos de ejemplo con la misma forma.
 | `sql/altanto_analytics_v26_rendimiento.sql` | Caché incremental: el panel carga en una llamada y Supabase procesa sólo los eventos nuevos. |
 | `sql/altanto_analytics_v27_sistema.sql` | Estado de los datos y espacio de la base, para el Resumen. |
 | `sql/altanto_analytics_v28_monitoreo.sql` | Sección Sistema: pasadas de la caché, tiempos de carga del panel y llegada de eventos. |
+| `sql/altanto_analytics_v29_alertas.sql` | Alertas por correo (Resend) cuando algo de Sistema falla. |
 | `sql/altanto_analytics_v23_comercios.sql` | Cadenas de comercios, comercios por persona (Monitoreo de comercios) y el correo de entrada en el perfil. |
 | `manifest.webmanifest`, `icons/` | Ícono del panel, de la pestaña del navegador y de «Añadir a inicio». |
 
@@ -55,6 +56,8 @@ separado de la base de la app.
    que el Resumen muestre cómo se leen los datos y cuánto ocupa la base.
 9. Corre [`sql/altanto_analytics_v28_monitoreo.sql`](sql/altanto_analytics_v28_monitoreo.sql) (después de v27) para
    la sección Sistema.
+10. Corre [`sql/altanto_analytics_v29_alertas.sql`](sql/altanto_analytics_v29_alertas.sql) (después de v28) para
+    las alertas por correo y actívalas como dice «Alertas por correo (v29)».
 
 La llave del panel es la **publicable**: sólo puede llamar `ingest_analytics`; leer exige una sesión
 que esté en `analytics_admins`. Nunca pongas aquí la `service_role`.
@@ -124,6 +127,33 @@ Sección del menú (grupo Panel) para vigilar que todo funcione:
   (`analytics_panel_loads`, 90 días). Sirve para mostrar el efecto de los cambios al panel.
 - **Últimas actualizaciones de la caché** (`analytics_refresh_log`, 30 días): cuándo, si fue
   automática o desde el panel, cuántos eventos nuevos y cuánto tardó.
+
+## Alertas por correo (v29)
+
+Cada 10 minutos pg_cron corre `analytics_alerts_run()`, que revisa:
+
+- que la actualización de la caché no lleve más de 30 min sin correr, ni falle 2 veces en una hora;
+- que haya llegado algún evento en las últimas 18 h (el hueco más largo de los 30 días previos fue de 14,5 h);
+- que la base no pase del 80 % del límite.
+
+Cuando algo empieza a fallar manda un correo, un recordatorio cada 24 h mientras siga y otro cuando se
+resuelve. Todo queda en `analytics_alerts` y `analytics_alert_sends` y se ve en Sistema › Alertas por correo,
+que también tiene «Mandar correo de prueba». El correo sale por [Resend](https://resend.com) (gratis hasta
+3.000 al mes) con `pg_net`.
+
+Para activarlas, una vez, en el editor SQL de Supabase:
+
+```sql
+-- 1. La llave de Resend (resend.com › API Keys), guardada cifrada en Vault:
+select vault.create_secret('re_...', 'analytics_alert_key');
+-- 2. Sin dominio verificado en Resend sólo se puede escribir al correo de la cuenta de Resend:
+update analytics_alert_config set recipients = array['correo-de-la-cuenta-de-resend'];
+```
+
+Con un dominio verificado en Resend, `from_addr = 'AlTanto Analytics <alertas@tu-dominio>'` y
+`recipients = '{}'` (vacío = todos los de `analytics_admins`). Umbrales (`stale_minutes`, `ingest_hours`,
+`space_pct`, `reminder_hours`) y `enabled` también están en `analytics_alert_config`. Si pg_cron entero se
+detiene, tampoco corre esta revisión: eso sólo se ve abriendo el panel.
 
 ## Bitácora (v25) y guía
 

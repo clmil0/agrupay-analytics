@@ -223,6 +223,7 @@ const GUIDE = {
       { t: 'Actualización automática', d: 'La tarea de pg_cron que pone al día la caché cada 5 minutos. «Falla» si alguna pasada falló en 24 h o si la última fue hace más de 15 minutos.' },
       { t: 'Pasada completa', d: 'Rehace las vistas que dependen de «hoy» (últimos 30 días, cohortes). Pasa como mucho cada 15 minutos cuando hay eventos nuevos, o cada hora.' },
       { t: 'Copias de seguridad', d: 'El plan Free de Supabase no guarda copias. Se resuelve con el plan Pro (copia diaria) o con una copia semanal automática.' },
+      { t: 'Alertas por correo', d: 'Cada 10 minutos Supabase revisa si la actualización se detuvo o falla, si pasaron 18 h sin ningún evento o si la base pasó del 80 %. Si algo empieza a fallar manda un correo (por Resend), un recordatorio cada 24 h mientras siga y otro cuando se resuelve. Los umbrales y destinatarios están en analytics_alert_config.' },
     ],
   },
 };
